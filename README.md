@@ -17,13 +17,13 @@ pnpm run build
 
 ### API Keys
 
-Pi handles authentication natively via `AuthStorage`. Options
-(in priority order):
+Pi handles authentication natively via `AuthStorage`. Options (in
+priority order):
 
 1. **`pi auth`** — interactive login, stores credentials in
    `~/.pi/agent/auth.json`
-2. **Environment variables** — `ANTHROPIC_API_KEY`,
-   `MISTRAL_API_KEY`, etc.
+2. **Environment variables** — `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`,
+   etc.
 3. **OAuth** — supported for providers that offer it
 
 ## Usage
@@ -46,14 +46,14 @@ node dist/index.js -P "explicit print mode"
 
 ### Non-TTY
 
-When run without a prompt in a non-TTY environment (e.g. piped or
-from an LLM agent), shows usage help instead of launching the TUI.
+When run without a prompt in a non-TTY environment (e.g. piped or from
+an LLM agent), shows usage help instead of launching the TUI.
 
 ## MCP Servers
 
 MCP servers are configured via `mcp.json` files. my-pi spawns each
-server as a child process over stdio and bridges their tools into
-pi's `customTools`.
+server as a child process over stdio and bridges their tools into pi's
+`customTools`.
 
 ### Global config
 
@@ -61,31 +61,30 @@ pi's `customTools`.
 
 ```json
 {
-  "mcpServers": {
-    "mcp-sqlite-tools": {
-      "command": "npx",
-      "args": ["-y", "mcp-sqlite-tools"]
-    }
-  }
+	"mcpServers": {
+		"mcp-sqlite-tools": {
+			"command": "npx",
+			"args": ["-y", "mcp-sqlite-tools"]
+		}
+	}
 }
 ```
 
 ### Project config
 
-`./mcp.json` in the project root — overrides global servers by
-name:
+`./mcp.json` in the project root — overrides global servers by name:
 
 ```json
 {
-  "mcpServers": {
-    "my-search": {
-      "command": "npx",
-      "args": ["-y", "some-mcp-server"],
-      "env": {
-        "API_KEY": "..."
-      }
-    }
-  }
+	"mcpServers": {
+		"my-search": {
+			"command": "npx",
+			"args": ["-y", "some-mcp-server"],
+			"env": {
+				"API_KEY": "..."
+			}
+		}
+	}
 }
 ```
 
