@@ -14,8 +14,7 @@ import { defineCommand, runMain } from 'citty';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { create_mcp_tools } from './mcp/bridge.js';
-import { load_mcp_config } from './mcp/config.js';
+import { create_extension } from './extension.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(
@@ -26,7 +25,8 @@ const main = defineCommand({
 	meta: {
 		name: 'my-pi',
 		version: pkg.version,
-		description: 'Personal pi coding agent with MCP tool integration',
+		description:
+			'Personal pi coding agent with MCP tool integration',
 	},
 	args: {
 		print: {
@@ -45,44 +45,41 @@ const main = defineCommand({
 		const cwd = process.cwd();
 		const agentDir = getAgentDir();
 
-		// Load MCP servers from mcp.json
-		const mcp_configs = load_mcp_config(cwd);
-		const mcp =
-			mcp_configs.length > 0
-				? await create_mcp_tools(mcp_configs)
-				: null;
-
-		const createRuntime: CreateAgentSessionRuntimeFactory = async ({
-			cwd: runtime_cwd,
-			sessionManager,
-			sessionStartEvent,
-		}) => {
-			const services = await createAgentSessionServices({
+		const createRuntime: CreateAgentSessionRuntimeFactory =
+			async ({
 				cwd: runtime_cwd,
-			});
+				sessionManager,
+				sessionStartEvent,
+			}) => {
+				const services =
+					await createAgentSessionServices({
+						cwd: runtime_cwd,
+						resourceLoaderOptions: {
+							extensionFactories: [
+								create_extension(runtime_cwd),
+							],
+						},
+					});
 
-			return {
-				...(await createAgentSessionFromServices({
+				return {
+					...(await createAgentSessionFromServices({
+						services,
+						sessionManager,
+						sessionStartEvent,
+					})),
 					services,
-					sessionManager,
-					sessionStartEvent,
-					customTools: mcp?.tools,
-				})),
-				services,
-				diagnostics: services.diagnostics,
+					diagnostics: services.diagnostics,
+				};
 			};
-		};
 
-		const runtime = await createAgentSessionRuntime(createRuntime, {
-			cwd,
-			agentDir,
-			sessionManager: SessionManager.create(cwd),
-		});
-
-		if (mcp_configs.length > 0) {
-			const names = mcp_configs.map((c) => c.name).join(', ');
-			console.error(`MCP servers: ${names}`);
-		}
+		const runtime = await createAgentSessionRuntime(
+			createRuntime,
+			{
+				cwd,
+				agentDir,
+				sessionManager: SessionManager.create(cwd),
+			},
+		);
 
 		if (args.print || args.prompt) {
 			await runPrintMode(runtime, {
@@ -91,16 +88,20 @@ const main = defineCommand({
 				initialImages: [],
 				messages: [],
 			});
-			await mcp?.cleanup();
 		} else if (!process.stdout.isTTY) {
-			// Non-TTY without prompt: show help for LLM agents
 			console.log(
 				`my-pi v${pkg.version} — pi coding agent with MCP tools\n`,
 			);
 			console.log('Usage:');
-			console.log('  my-pi "prompt"           One-shot print mode');
-			console.log('  my-pi                    Interactive TUI mode');
-			console.log('  my-pi -P "prompt"        Explicit print mode');
+			console.log(
+				'  my-pi "prompt"           One-shot print mode',
+			);
+			console.log(
+				'  my-pi                    Interactive TUI mode',
+			);
+			console.log(
+				'  my-pi -P "prompt"        Explicit print mode',
+			);
 		} else {
 			const mode = new InteractiveMode(runtime, {
 				migratedProviders: [],
