@@ -11,17 +11,23 @@ import {
 	getAgentDir,
 	runPrintMode,
 	type ExtensionFactory,
+	type LoadExtensionsResult,
 } from '@mariozechner/pi-coding-agent';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
+import chain_extension from './extensions/chain.js';
+import {
+	BUILTIN_EXTENSIONS,
+	is_builtin_extension_active,
+	load_builtin_extensions_config,
+	type BuiltinExtensionKey,
+} from './extensions/config.js';
+import { create_extensions_extension } from './extensions/extensions.js';
+import filter_output_extension from './extensions/filter-output.js';
+import handoff_extension from './extensions/handoff.js';
+import mcp_extension from './extensions/mcp.js';
+import recall_extension from './extensions/recall.js';
+import skills_extension from './extensions/skills.js';
 import { create_skills_manager } from './skills/manager.js';
-
-const ext_dir = resolve(
-	dirname(fileURLToPath(import.meta.url)),
-	'..',
-	'src',
-	'extensions',
-);
 
 export interface CreateMyPiOptions {
 	cwd?: string;
@@ -34,6 +40,79 @@ export interface CreateMyPiOptions {
 	handoff?: boolean;
 	recall?: boolean;
 	model?: string;
+}
+
+const BUILTIN_EXTENSION_FACTORIES: Record<
+	BuiltinExtensionKey,
+	ExtensionFactory
+> = {
+	mcp: mcp_extension,
+	skills: skills_extension,
+	chain: chain_extension,
+	'filter-output': filter_output_extension,
+	handoff: handoff_extension,
+	recall: recall_extension,
+};
+
+function get_force_disabled_builtins(
+	options: Pick<
+		CreateMyPiOptions,
+		| 'mcp'
+		| 'skills'
+		| 'chain'
+		| 'filter_output'
+		| 'handoff'
+		| 'recall'
+	>,
+): ReadonlySet<BuiltinExtensionKey> {
+	const force_disabled = new Set<BuiltinExtensionKey>();
+	if (!options.mcp) force_disabled.add('mcp');
+	if (!options.skills) force_disabled.add('skills');
+	if (!options.chain) force_disabled.add('chain');
+	if (!options.filter_output) force_disabled.add('filter-output');
+	if (!options.handoff) force_disabled.add('handoff');
+	if (!options.recall) force_disabled.add('recall');
+	return force_disabled;
+}
+
+function create_builtin_extension_factory(
+	key: BuiltinExtensionKey,
+	extension: ExtensionFactory,
+	force_disabled: ReadonlySet<BuiltinExtensionKey>,
+): ExtensionFactory {
+	return async (pi) => {
+		const config = load_builtin_extensions_config();
+		if (!is_builtin_extension_active(config, key, force_disabled)) {
+			return;
+		}
+		await extension(pi);
+	};
+}
+
+function create_extensions_override(
+	managed_inline_paths: string[],
+): (base: LoadExtensionsResult) => LoadExtensionsResult {
+	const managed_paths = new Set(managed_inline_paths);
+	return (base) => {
+		const managed = new Map(
+			base.extensions.map((extension) => [extension.path, extension]),
+		);
+		const ordered_managed = managed_inline_paths
+			.map((path) => managed.get(path))
+			.filter(
+				(
+					extension,
+				): extension is LoadExtensionsResult['extensions'][number] =>
+					Boolean(extension),
+			);
+		const others = base.extensions.filter(
+			(extension) => !managed_paths.has(extension.path),
+		);
+		return {
+			...base,
+			extensions: [...ordered_managed, ...others],
+		};
+	};
 }
 
 export async function create_my_pi(options: CreateMyPiOptions = {}) {
@@ -51,15 +130,27 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 	} = options;
 
 	const resolved_extensions = extensions.map((p) => resolve(cwd, p));
-	const builtin_extension_paths = [
-		...(mcp ? [resolve(ext_dir, 'mcp.ts')] : []),
-		...(skills ? [resolve(ext_dir, 'skills.ts')] : []),
-		...(chain ? [resolve(ext_dir, 'chain.ts')] : []),
-		...(filter_output ? [resolve(ext_dir, 'filter-output.ts')] : []),
-		...(handoff ? [resolve(ext_dir, 'handoff.ts')] : []),
-		...(recall ? [resolve(ext_dir, 'recall.ts')] : []),
+	const force_disabled = get_force_disabled_builtins({
+		mcp,
+		skills,
+		chain,
+		filter_output,
+		handoff,
+		recall,
+	});
+	const managed_extension_factories: ExtensionFactory[] = [
+		create_extensions_extension({ force_disabled }),
+		...BUILTIN_EXTENSIONS.map((extension) =>
+			create_builtin_extension_factory(
+				extension.key,
+				BUILTIN_EXTENSION_FACTORIES[extension.key],
+				force_disabled,
+			),
+		),
 	];
-	const skills_manager = skills ? create_skills_manager() : undefined;
+	const managed_inline_paths = managed_extension_factories.map(
+		(_, index) => `<inline:${index + 1}>`,
+	);
 
 	const create_runtime = async ({
 		cwd: runtime_cwd,
@@ -84,24 +175,37 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 				? { settingsManager: settings_manager }
 				: {}),
 			resourceLoaderOptions: {
-				additionalExtensionPaths: [
-					...builtin_extension_paths,
-					...resolved_extensions,
+				additionalExtensionPaths: [...resolved_extensions],
+				extensionFactories: [
+					...managed_extension_factories,
+					...user_factories,
 				],
-				extensionFactories: [...user_factories],
-				...(skills_manager
-					? {
-							skillsOverride: (base: any) => ({
-								...base,
-								skills: base.skills.filter((skill: any) =>
-									skills_manager.is_enabled_by_skill(
-										skill.name,
-										skill.filePath,
-									),
-								),
-							}),
-						}
-					: {}),
+				extensionsOverride: create_extensions_override(
+					managed_inline_paths,
+				),
+				skillsOverride: (base: any) => {
+					const config = load_builtin_extensions_config();
+					if (
+						!is_builtin_extension_active(
+							config,
+							'skills',
+							force_disabled,
+						)
+					) {
+						return base;
+					}
+
+					const skills_manager = create_skills_manager();
+					return {
+						...base,
+						skills: base.skills.filter((skill: any) =>
+							skills_manager.is_enabled_by_skill(
+								skill.name,
+								skill.filePath,
+							),
+						),
+					};
+				},
 			} as any,
 		});
 

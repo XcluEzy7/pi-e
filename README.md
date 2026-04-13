@@ -63,8 +63,12 @@ my-pi -e ./ext/damage-control.ts -e ./ext/tool-counter.ts
 my-pi --no-builtin -e ./ext/custom.ts "do something"
 ```
 
-Stack arbitrary Pi extensions via `-e`. Use `--no-builtin` to skip the
-built-in MCP and skills extensions.
+Stack arbitrary Pi extensions via `-e`. Use `--no-builtin` to skip all
+built-in extensions.
+
+Built-in extension choices can also be saved interactively with
+`/extensions`. Startup flags like `--no-recall` and `--no-skills`
+still force-disable those extensions for the current process only.
 
 ### Stdin piping
 
@@ -142,6 +146,11 @@ In interactive mode:
 - `/mcp list` — show connected servers and tool counts
 - `/mcp enable <server>` — enable a disabled server's tools
 - `/mcp disable <server>` — disable a server's tools
+- `/extensions` — open the built-in extensions manager
+- `/extensions list` — print built-in extensions with saved/effective
+  state
+- `/extensions enable <key>` / `/extensions disable <key>` — toggle a
+  built-in extension
 - `/skills` — open the interactive skills manager
 - `/skills list` — print discovered skills with enabled state
 - `/skills enable <key>` / `/skills disable <key>` — toggle a skill
@@ -156,7 +165,9 @@ In interactive mode:
 5. Registers each tool via `pi.registerTool()` as
    `mcp__<server>__<tool>`
 6. `/mcp enable/disable` toggles tools via `pi.setActiveTools()`
-7. Cleanup on `session_shutdown`
+7. Built-in extension state can be managed via `/extensions` and is
+   persisted in `~/.config/my-pi/extensions.json`
+8. Cleanup on `session_shutdown`
 
 ## Agent Chains
 
@@ -216,11 +227,14 @@ src/
   index.ts            CLI entry point (citty + pi SDK)
   api.ts              Programmatic API (create_my_pi + re-exports)
   extensions/
+    config.ts         Persistent built-in extension config
+    extensions.ts     Built-in extension manager (/extensions)
     mcp.ts            MCP server integration
     skills.ts         Skill discovery and toggle
     chain.ts          Agent chain pipelines
     filter-output.ts  Secret redaction in tool output
     handoff.ts        Session context export
+    recall.ts         Past session recall guidance
   mcp/
     client.ts         Minimal MCP stdio client (JSON-RPC 2.0)
     config.ts         Loads and merges mcp.json configs

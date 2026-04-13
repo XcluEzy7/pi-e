@@ -167,7 +167,7 @@ const main = defineCommand({
 				'  my-pi -m claude-haiku-4-5-20241022  Set initial model',
 			);
 			console.log(
-				'  my-pi --no-builtin -e ext.ts     Skip mcp+skills builtins',
+				'  my-pi --no-builtin -e ext.ts     Skip all built-in extensions',
 			);
 		} else {
 			const mode = new InteractiveMode(runtime, {
