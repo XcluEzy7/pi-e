@@ -9,7 +9,10 @@ import {
 import { Type } from '@sinclair/typebox';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── Types ───────────────────────────────────────
 
@@ -154,17 +157,35 @@ function scan_agent_dirs(cwd: string): Map<string, AgentDef> {
 
 // ── Run a single agent step via my-pi print mode ─
 
+const AGENT_STEP_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
 function run_agent_step(
 	agent_def: AgentDef,
 	task: string,
+	model?: string,
 ): Promise<{ output: string; exitCode: number }> {
-	// Use the current process (my-pi) in print mode
-	const bin = process.argv[1];
-	const args = ['--no-builtin', '-P', task];
+	// Resolve bin path: prefer known dist location over process.argv[1]
+	// (process.argv[1] may point to a wrapper like codex, not my-pi)
+	const bin = join(__dirname, '..', 'index.js');
+	const args = ['--no-builtin', '--json', '--prompt', task];
+	if (model) {
+		args.push('--model', model);
+	}
 
 	const chunks: string[] = [];
 
 	return new Promise((res) => {
+		let settled = false;
+		const resolve_once = (result: {
+			output: string;
+			exitCode: number;
+		}) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			res(result);
+		};
+
 		const proc = spawn(process.execPath, [bin, ...args], {
 			stdio: ['ignore', 'pipe', 'pipe'],
 			env: {
@@ -172,6 +193,14 @@ function run_agent_step(
 				MY_PI_AGENT_SYSTEM_PROMPT: agent_def.systemPrompt,
 			},
 		});
+
+		const timer = setTimeout(() => {
+			proc.kill('SIGTERM');
+			resolve_once({
+				output: `Agent step timed out after ${AGENT_STEP_TIMEOUT_MS / 1000}s`,
+				exitCode: 1,
+			});
+		}, AGENT_STEP_TIMEOUT_MS);
 
 		proc.stdout!.setEncoding('utf-8');
 		proc.stdout!.on('data', (chunk: string) => {
@@ -182,14 +211,36 @@ function run_agent_step(
 		proc.stderr!.on('data', () => {});
 
 		proc.on('close', (code) => {
-			res({
-				output: chunks.join('').trim(),
+			// Parse NDJSON events to extract assistant text content
+			const raw = chunks.join('');
+			const text_parts: string[] = [];
+			for (const line of raw.split('\n')) {
+				if (!line.trim()) continue;
+				try {
+					const event = JSON.parse(line);
+					if (
+						event?.role === 'assistant' &&
+						Array.isArray(event?.content)
+					) {
+						for (const c of event.content) {
+							if (c.type === 'text' && c.text) {
+								text_parts.push(c.text);
+							}
+						}
+					}
+				} catch {
+					// not JSON — use raw line
+					text_parts.push(line);
+				}
+			}
+			resolve_once({
+				output: text_parts.join('\n').trim() || raw.trim(),
 				exitCode: code ?? 1,
 			});
 		});
 
 		proc.on('error', (err) => {
-			res({
+			resolve_once({
 				output: `Error spawning agent: ${err.message}`,
 				exitCode: 1,
 			});
@@ -200,9 +251,26 @@ function run_agent_step(
 // ── Extension ──────────────────────────────────
 
 // Default export for Pi Package / additionalExtensionPaths loading
+function parse_model_from_argv(): string | undefined {
+	const argv = process.argv;
+	for (let i = 0; i < argv.length; i++) {
+		if (
+			(argv[i] === '--model' || argv[i] === '-m') &&
+			i + 1 < argv.length
+		) {
+			return argv[i + 1];
+		}
+		if (argv[i]?.startsWith('--model=')) {
+			return argv[i].slice('--model='.length);
+		}
+	}
+	return undefined;
+}
+
 export default async function chain(pi: ExtensionAPI) {
 	const cwd = process.cwd();
 	const agents = scan_agent_dirs(cwd);
+	const current_model = parse_model_from_argv();
 	let chains: ChainDef[] = [];
 	let active_chain: ChainDef | null = null;
 
@@ -292,6 +360,7 @@ export default async function chain(pi: ExtensionAPI) {
 					const result = await run_agent_step(
 						agent_def,
 						resolved_prompt,
+						current_model,
 					);
 
 					if (result.exitCode !== 0) {

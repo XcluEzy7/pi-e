@@ -99,11 +99,13 @@ const main = defineCommand({
 		model: {
 			type: 'string',
 			alias: 'm',
-			description: 'Model to use (e.g. claude-sonnet-4-5-20241022)',
+			description:
+				'Model to use (e.g. claude-sonnet-4-5-20241022, gpt-5.4)',
 		},
 		prompt: {
-			type: 'positional',
-			description: 'Initial prompt (optional)',
+			type: 'string',
+			alias: 'p',
+			description: 'Prompt text (alternative to positional argument)',
 			required: false,
 		},
 	},
@@ -111,10 +113,35 @@ const main = defineCommand({
 		const cwd = process.cwd();
 		const extension_paths = parse_extension_paths(process.argv);
 
-		// Stdin piping: read all stdin as prompt when piped
+		// Resolve prompt: named --prompt flag > positional > stdin
 		let prompt = args.prompt;
+		if (!prompt) {
+			// Check for positional arguments (after citty strips flags)
+			const positionals = (args as any)._ as string[] | undefined;
+			if (positionals && positionals.length > 0) {
+				prompt = positionals[0];
+			}
+		}
 		if (!prompt && !process.stdin.isTTY) {
 			prompt = await read_stdin();
+		}
+
+		// Model validation (issue #5)
+		if (args.model && /[/\\]/.test(args.model)) {
+			console.error(
+				`Error: Invalid model "${args.model}". Use bare model names without provider prefixes.`,
+			);
+			console.error(
+				`  Examples: claude-sonnet-4-5-20241022, gpt-5.4, mistral-large`,
+			);
+			process.exit(1);
+		}
+
+		// Startup feedback so silence = broken (issue #3)
+		if (args.print || args.json || prompt) {
+			process.stderr.write(
+				`my-pi: connecting to ${args.model || 'default model'}...\n`,
+			);
 		}
 
 		const runtime = await create_my_pi({
