@@ -177,6 +177,9 @@ In interactive mode:
   prompt layer directly
 - `/preset edit <name>` — edit or create a project-local preset in
   `.pi/presets.json`
+- `/preset delete <name>` — delete a project-local preset
+- `/preset reset <name>` — remove a project-local override and fall
+  back to user/built-in if available
 - `/preset clear` — clear the active base preset and all layers
 
 ### How it works
@@ -262,6 +265,15 @@ Preset sources are merged in this order:
 Project presets override global/default presets with the same name.
 Strings are treated as base presets by default. Object entries may set
 `kind: "base"` or `kind: "layer"`.
+
+CLI layering is supported too:
+
+- `--preset terse,no-purple-prose,bullets`
+- `--system-prompt "You are terse and technical."`
+- `--append-system-prompt "Prefer one short paragraph."`
+
+This repo also includes an example `.pi/presets.json` with sample base
+presets and layers.
 
 ## Session Handoff
 

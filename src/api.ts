@@ -43,6 +43,8 @@ export interface CreateMyPiOptions {
 	recall?: boolean;
 	prompt_presets?: boolean;
 	model?: string;
+	system_prompt?: string;
+	append_system_prompt?: string;
 }
 
 const BUILTIN_EXTENSION_FACTORIES: Record<
@@ -137,6 +139,8 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 		recall = true,
 		prompt_presets = true,
 		model,
+		system_prompt,
+		append_system_prompt,
 	} = options;
 
 	const resolved_extensions = extensions.map((p) => resolve(cwd, p));
@@ -186,6 +190,19 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 				? { settingsManager: settings_manager }
 				: {}),
 			resourceLoaderOptions: {
+				...(system_prompt !== undefined
+					? {
+							systemPromptOverride: () => system_prompt,
+						}
+					: {}),
+				...(append_system_prompt !== undefined
+					? {
+							appendSystemPromptOverride: (base: string[]) => [
+								...base,
+								append_system_prompt,
+							],
+						}
+					: {}),
 				additionalExtensionPaths: [...resolved_extensions],
 				additionalThemePaths: [PACKAGE_THEME_DIR],
 				extensionFactories: [

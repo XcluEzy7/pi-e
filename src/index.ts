@@ -107,6 +107,16 @@ const main = defineCommand({
 			description:
 				'Model to use (e.g. claude-sonnet-4-5-20241022, gpt-5.4)',
 		},
+		'system-prompt': {
+			type: 'string',
+			description: 'Replace the base system prompt',
+			required: false,
+		},
+		'append-system-prompt': {
+			type: 'string',
+			description: 'Append one-off instructions to the system prompt',
+			required: false,
+		},
 		prompt: {
 			type: 'string',
 			alias: 'p',
@@ -161,6 +171,8 @@ const main = defineCommand({
 			prompt_presets:
 				!args['no-builtin'] && !args['no-prompt-presets'],
 			model: args.model,
+			system_prompt: args['system-prompt'],
+			append_system_prompt: args['append-system-prompt'],
 		});
 
 		if (args.print || args.json || prompt) {

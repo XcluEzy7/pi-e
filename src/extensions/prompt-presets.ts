@@ -15,6 +15,7 @@ import {
 	mkdirSync,
 	readFileSync,
 	renameSync,
+	unlinkSync,
 	writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -202,7 +203,7 @@ function sort_prompt_presets(
 	);
 }
 
-function save_project_prompt_presets(
+export function save_project_prompt_presets(
 	cwd: string,
 	presets: PromptPresetMap,
 ): string {
@@ -220,6 +221,37 @@ function save_project_prompt_presets(
 	);
 	renameSync(tmp, path);
 	return path;
+}
+
+export function remove_project_prompt_preset(
+	cwd: string,
+	name: string,
+): {
+	removed: boolean;
+	path: string;
+	remaining: number;
+} {
+	const path = get_project_presets_path(cwd);
+	const project_presets = read_prompt_presets_file(path);
+	if (!(name in project_presets)) {
+		return {
+			removed: false,
+			path,
+			remaining: Object.keys(project_presets).length,
+		};
+	}
+
+	delete project_presets[name];
+	const remaining = Object.keys(project_presets).length;
+	if (remaining === 0) {
+		if (existsSync(path)) {
+			unlinkSync(path);
+		}
+		return { removed: true, path, remaining };
+	}
+
+	save_project_prompt_presets(cwd, project_presets);
+	return { removed: true, path, remaining };
 }
 
 function get_last_preset_state(
@@ -398,6 +430,8 @@ function is_subcommand(command: string): boolean {
 		'show',
 		'clear',
 		'edit',
+		'delete',
+		'reset',
 		'reload',
 		'base',
 		'enable',
@@ -561,6 +595,48 @@ export default async function prompt_presets(pi: ExtensionAPI) {
 		}
 		ctx.ui.notify(
 			`Saved preset "${name}" to ${get_project_presets_path(ctx.cwd)}`,
+			'info',
+		);
+	}
+
+	function remove_custom_preset(
+		name: string,
+		ctx: ExtensionCommandContext,
+		mode: 'delete' | 'reset',
+	): void {
+		const result = remove_project_prompt_preset(ctx.cwd, name);
+		if (!result.removed) {
+			ctx.ui.notify(
+				`No project-local preset named "${name}" to ${mode}`,
+				'warning',
+			);
+			return;
+		}
+
+		presets = load_prompt_presets(ctx.cwd);
+		const normalized = normalize_active_state(
+			presets,
+			active_base_name,
+			active_layers,
+		);
+		active_base_name = normalized.active_base_name;
+		active_layers = normalized.active_layers;
+		set_status(ctx, active_base_name, active_layers);
+		persist_state(pi, active_base_name, active_layers);
+
+		const fallback = presets[name];
+		if (mode === 'reset' && fallback) {
+			ctx.ui.notify(
+				`Reset "${name}" to ${get_prompt_source_label(fallback.source)} preset`,
+				'info',
+			);
+			return;
+		}
+
+		ctx.ui.notify(
+			result.remaining === 0
+				? `Removed "${name}" and deleted ${result.path}`
+				: `Removed "${name}" from ${result.path}`,
 			'info',
 		);
 	}
@@ -779,6 +855,8 @@ export default async function prompt_presets(pi: ExtensionAPI) {
 					'show',
 					'clear',
 					'edit',
+					'delete',
+					'reset',
 					'reload',
 					'base',
 					'enable',
@@ -814,6 +892,14 @@ export default async function prompt_presets(pi: ExtensionAPI) {
 				return all_names
 					.filter((item) => item.startsWith(query))
 					.map((item) => ({ value: `edit ${item}`, label: item }));
+			}
+			if (['delete', 'reset'].includes(command)) {
+				return all_names
+					.filter((item) => item.startsWith(query))
+					.map((item) => ({
+						value: `${command} ${item}`,
+						label: item,
+					}));
 			}
 			return null;
 		},
@@ -906,6 +992,20 @@ export default async function prompt_presets(pi: ExtensionAPI) {
 						return;
 					}
 					await edit_preset(arg, ctx);
+					return;
+				case 'delete':
+					if (!arg) {
+						ctx.ui.notify('Usage: /preset delete <name>', 'warning');
+						return;
+					}
+					remove_custom_preset(arg, ctx, 'delete');
+					return;
+				case 'reset':
+					if (!arg) {
+						ctx.ui.notify('Usage: /preset reset <name>', 'warning');
+						return;
+					}
+					remove_custom_preset(arg, ctx, 'reset');
 					return;
 			}
 
