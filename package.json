@@ -9,8 +9,16 @@
 		"pi",
 		"pi-package"
 	],
+	"homepage": "https://github.com/spences10/my-pi#readme",
+	"bugs": {
+		"url": "https://github.com/spences10/my-pi/issues"
+	},
 	"license": "MIT",
 	"author": "Scott Spence <spences10apps@gmail.com>",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/spences10/my-pi.git"
+	},
 	"bin": {
 		"my-pi": "./dist/index.js"
 	},
