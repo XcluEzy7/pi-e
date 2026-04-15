@@ -1,5 +1,14 @@
 # my-pi
 
+## 0.0.7
+
+### Patch Changes
+
+- 33b0d81: Add CLI system prompt overrides, example preset config, and
+  delete or reset support for custom presets.
+- 3281a14: Add runtime prompt preset manager with base presets,
+  additive layers, CLI selection, editing, and persistence.
+
 ## 0.0.6
 
 ### Patch Changes
