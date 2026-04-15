@@ -170,6 +170,14 @@ In interactive mode:
 - `/skills sync <key|name>` — sync an imported skill to its upstream
 - `/skills refresh` — rescan skill directories
 - `/skills defaults <all-enabled|all-disabled>` — set default policy
+- `/preset` — open the prompt preset manager (base presets + layers)
+- `/preset <name>` — activate a base preset or toggle a layer
+- `/preset base <name>` — activate a base preset directly
+- `/preset enable <layer>` / `/preset disable <layer>` — toggle a
+  prompt layer directly
+- `/preset edit <name>` — edit or create a project-local preset in
+  `.pi/presets.json`
+- `/preset clear` — clear the active base preset and all layers
 
 ### How it works
 
@@ -224,6 +232,37 @@ them. Detection patterns from
 Use `/redact-stats` to see how many secrets were caught. Disable with
 `--no-filter`.
 
+## Prompt Presets
+
+Prompt presets append runtime instructions to the system prompt
+through a built-in extension. They are split into:
+
+- **base presets** — one active at a time
+- **prompt layers** — additive checkboxes you can combine
+
+Built-in base presets:
+
+- `terse` — short, direct, no fluff
+- `standard` — clear and concise with key context
+- `detailed` — more explanation when nuance matters
+
+Built-in layers:
+
+- `no-purple-prose`
+- `bullets`
+- `clarify-first`
+- `include-risks`
+
+Preset sources are merged in this order:
+
+1. built-in defaults
+2. `~/.pi/agent/presets.json`
+3. `.pi/presets.json`
+
+Project presets override global/default presets with the same name.
+Strings are treated as base presets by default. Object entries may set
+`kind: "base"` or `kind: "layer"`.
+
 ## Session Handoff
 
 Use `/handoff <task>` to export conversation context as a markdown
@@ -249,6 +288,7 @@ src/
     chain.ts          Agent chain pipelines
     filter-output.ts  Secret redaction in tool output
     handoff.ts        Session context export
+    prompt-presets.ts Runtime prompt preset selection and editing
     recall.ts         Past session recall guidance
   mcp/
     client.ts         Minimal MCP stdio client (JSON-RPC 2.0)
@@ -261,6 +301,7 @@ src/
   agents/
     *.md              Agent definitions (frontmatter + system prompt)
     agent-chain.yaml  Chain pipeline definitions
+  presets.json        Optional project prompt presets
 mcp.json              Project MCP server config
 ```
 

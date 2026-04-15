@@ -14,7 +14,8 @@ export type BuiltinExtensionKey =
 	| 'chain'
 	| 'filter-output'
 	| 'handoff'
-	| 'recall';
+	| 'recall'
+	| 'prompt-presets';
 
 export interface BuiltinExtensionInfo {
 	key: BuiltinExtensionKey;
@@ -87,6 +88,14 @@ export const BUILTIN_EXTENSIONS: BuiltinExtensionInfo[] = [
 		description: 'Past session recall guidance and /recall command',
 		cli_flag: '--no-recall',
 		aliases: ['recall'],
+	},
+	{
+		key: 'prompt-presets',
+		label: 'Prompt presets',
+		description:
+			'Runtime prompt preset selection and /preset command',
+		cli_flag: '--no-prompt-presets',
+		aliases: ['prompt-presets', 'preset', 'presets'],
 	},
 ];
 

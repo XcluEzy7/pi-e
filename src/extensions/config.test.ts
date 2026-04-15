@@ -20,6 +20,9 @@ describe('find_builtin_extension', () => {
 			'filter-output',
 		);
 		expect(find_builtin_extension('skill')?.key).toBe('skills');
+		expect(find_builtin_extension('preset')?.key).toBe(
+			'prompt-presets',
+		);
 	});
 });
 

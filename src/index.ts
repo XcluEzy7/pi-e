@@ -96,6 +96,11 @@ const main = defineCommand({
 			description: 'Disable recall extension',
 			default: false,
 		},
+		'no-prompt-presets': {
+			type: 'boolean',
+			description: 'Disable prompt presets extension',
+			default: false,
+		},
 		model: {
 			type: 'string',
 			alias: 'm',
@@ -153,6 +158,8 @@ const main = defineCommand({
 			filter_output: !args['no-builtin'] && !args['no-filter'],
 			handoff: !args['no-builtin'] && !args['no-handoff'],
 			recall: !args['no-builtin'] && !args['no-recall'],
+			prompt_presets:
+				!args['no-builtin'] && !args['no-prompt-presets'],
 			model: args.model,
 		});
 

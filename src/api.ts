@@ -26,6 +26,7 @@ import { create_extensions_extension } from './extensions/extensions.js';
 import filter_output_extension from './extensions/filter-output.js';
 import handoff_extension from './extensions/handoff.js';
 import mcp_extension from './extensions/mcp.js';
+import prompt_presets_extension from './extensions/prompt-presets.js';
 import recall_extension from './extensions/recall.js';
 import skills_extension from './extensions/skills.js';
 import { create_skills_manager } from './skills/manager.js';
@@ -40,6 +41,7 @@ export interface CreateMyPiOptions {
 	filter_output?: boolean;
 	handoff?: boolean;
 	recall?: boolean;
+	prompt_presets?: boolean;
 	model?: string;
 }
 
@@ -53,6 +55,7 @@ const BUILTIN_EXTENSION_FACTORIES: Record<
 	'filter-output': filter_output_extension,
 	handoff: handoff_extension,
 	recall: recall_extension,
+	'prompt-presets': prompt_presets_extension,
 };
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
@@ -67,6 +70,7 @@ function get_force_disabled_builtins(
 		| 'filter_output'
 		| 'handoff'
 		| 'recall'
+		| 'prompt_presets'
 	>,
 ): ReadonlySet<BuiltinExtensionKey> {
 	const force_disabled = new Set<BuiltinExtensionKey>();
@@ -76,6 +80,7 @@ function get_force_disabled_builtins(
 	if (!options.filter_output) force_disabled.add('filter-output');
 	if (!options.handoff) force_disabled.add('handoff');
 	if (!options.recall) force_disabled.add('recall');
+	if (!options.prompt_presets) force_disabled.add('prompt-presets');
 	return force_disabled;
 }
 
@@ -130,6 +135,7 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 		filter_output = true,
 		handoff = true,
 		recall = true,
+		prompt_presets = true,
 		model,
 	} = options;
 
@@ -141,6 +147,7 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 		filter_output,
 		handoff,
 		recall,
+		prompt_presets,
 	});
 	const managed_extension_factories: ExtensionFactory[] = [
 		create_extensions_extension({ force_disabled }),
