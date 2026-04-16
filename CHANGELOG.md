@@ -1,5 +1,14 @@
 # my-pi
 
+## 0.0.8
+
+### Patch Changes
+
+- 7cb74cb: Persist prompt presets across sessions and align footer
+  prompt indicator beneath model using themed styling.
+- ad8da43: Add HTTP MCP server support, validate transport config
+  clearly, and close resolved CLI prompt issues.
+
 ## 0.0.7
 
 ### Patch Changes
