@@ -73,6 +73,31 @@ export interface LspClientOptions {
 	request_timeout_ms?: number;
 }
 
+export class LspClientStartError extends Error {
+	command: string;
+	args: string[];
+	code?: string;
+
+	constructor(
+		message: string,
+		options: {
+			command: string;
+			args: string[];
+			cause?: unknown;
+			code?: string;
+		},
+	) {
+		super(
+			message,
+			options.cause ? { cause: options.cause } : undefined,
+		);
+		this.name = 'LspClientStartError';
+		this.command = options.command;
+		this.args = options.args;
+		this.code = options.code;
+	}
+}
+
 export class LspClient extends EventEmitter {
 	#proc: ChildProcess | null = null;
 	#options: LspClientOptions;
@@ -101,10 +126,47 @@ export class LspClient extends EventEmitter {
 			env: process.env,
 		});
 
+		let start_reject: ((error: Error) => void) | null = null;
+		const start_failure = new Promise<never>((_, reject) => {
+			start_reject = reject;
+		});
+		const reject_start = (error: Error): boolean => {
+			if (!start_reject) return false;
+			const reject = start_reject;
+			start_reject = null;
+			reject(error);
+			return true;
+		};
+		const start_error = (
+			message: string,
+			cause?: unknown,
+			code?: string,
+		): LspClientStartError =>
+			new LspClientStartError(message, {
+				command: this.#options.command,
+				args: this.#options.args,
+				cause,
+				code,
+			});
+
 		this.#proc.on('error', (err) => {
-			this.emit('error', err);
+			const wrapped = start_error(
+				`Failed to spawn ${this.#options.command}`,
+				err,
+				error_code(err),
+			);
+			if (!reject_start(wrapped)) {
+				this.#emit_error(wrapped);
+			}
 		});
 		this.#proc.on('close', () => {
+			if (!this.#initialized) {
+				reject_start(
+					start_error(
+						`LSP server ${this.#options.command} closed before initialization`,
+					),
+				);
+			}
 			for (const pending of this.#pending.values()) {
 				clearTimeout(pending.timer);
 				pending.reject(new Error('LSP server closed'));
@@ -121,30 +183,43 @@ export class LspClient extends EventEmitter {
 			this.#drain_buffer();
 		});
 
-		await this.#request('initialize', {
-			processId: process.pid,
-			rootUri: this.#options.root_uri,
-			capabilities: {
-				textDocument: {
-					publishDiagnostics: { relatedInformation: true },
-					hover: { contentFormat: ['markdown', 'plaintext'] },
-					definition: { linkSupport: false },
-					references: {},
-					documentSymbol: {
-						hierarchicalDocumentSymbolSupport: true,
+		try {
+			await Promise.race([
+				this.#request('initialize', {
+					processId: process.pid,
+					rootUri: this.#options.root_uri,
+					capabilities: {
+						textDocument: {
+							publishDiagnostics: {
+								relatedInformation: true,
+							},
+							hover: {
+								contentFormat: ['markdown', 'plaintext'],
+							},
+							definition: { linkSupport: false },
+							references: {},
+							documentSymbol: {
+								hierarchicalDocumentSymbolSupport: true,
+							},
+						},
+						workspace: {
+							workspaceFolders: true,
+							symbol: {},
+						},
 					},
-				},
-				workspace: {
-					workspaceFolders: true,
-					symbol: {},
-				},
-			},
-			workspaceFolders: [
-				{ uri: this.#options.root_uri, name: 'workspace' },
-			],
-		});
-		this.#notify('initialized', {});
-		this.#initialized = true;
+					workspaceFolders: [
+						{ uri: this.#options.root_uri, name: 'workspace' },
+					],
+				}),
+				start_failure,
+			]);
+			this.#notify('initialized', {});
+			this.#initialized = true;
+			start_reject = null;
+		} catch (error) {
+			await this.stop();
+			throw error;
+		}
 	}
 
 	is_ready(): boolean {
@@ -333,6 +408,12 @@ export class LspClient extends EventEmitter {
 		this.#proc.stdin.write(Buffer.concat([header, body]));
 	}
 
+	#emit_error(error: unknown): void {
+		if (this.listenerCount('error') > 0) {
+			this.emit('error', error);
+		}
+	}
+
 	#drain_buffer(): void {
 		while (true) {
 			const header_end = this.#buffer.indexOf('\r\n\r\n');
@@ -361,7 +442,7 @@ export class LspClient extends EventEmitter {
 					JSON.parse(body.toString('utf8')) as JsonRpcMessage,
 				);
 			} catch (error) {
-				this.emit('error', error);
+				this.#emit_error(error);
 			}
 		}
 	}
@@ -462,4 +543,13 @@ export function normalize_document_symbol_result(
 
 export function file_path_to_uri(file_path: string): string {
 	return pathToFileURL(file_path).href;
+}
+
+function error_code(error: unknown): string | undefined {
+	return typeof error === 'object' &&
+		error !== null &&
+		'code' in error &&
+		typeof (error as { code?: unknown }).code === 'string'
+		? (error as { code: string }).code
+		: undefined;
 }

@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
 	detect_language,
+	find_workspace_root,
 	get_server_config,
 	list_supported_languages,
 	resolve_server_command,
@@ -75,6 +76,35 @@ describe('resolve_server_command', () => {
 		const cwd = mkdtempSync(join(tmpdir(), 'my-pi-lsp-'));
 		dirs.push(cwd);
 		expect(resolve_server_command('gopls', cwd)).toBe('gopls');
+	});
+});
+
+describe('find_workspace_root', () => {
+	it('prefers the nearest project markers for nested app workspaces', () => {
+		const root = mkdtempSync(join(tmpdir(), 'my-pi-lsp-'));
+		const app = join(root, 'apps', 'website');
+		const file = join(app, 'src', 'routes', '+page.svelte');
+		dirs.push(root);
+		mkdirSync(join(app, 'src', 'routes'), { recursive: true });
+		writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n');
+		writeFileSync(join(app, 'package.json'), '{}\n');
+		writeFileSync(
+			join(app, 'svelte.config.js'),
+			'export default {};\n',
+		);
+		writeFileSync(file, '<h1>Hello</h1>\n');
+
+		expect(find_workspace_root(file, '/fallback')).toBe(app);
+	});
+
+	it('falls back to the provided cwd when no workspace markers exist', () => {
+		const root = mkdtempSync(join(tmpdir(), 'my-pi-lsp-'));
+		const file = join(root, 'src', 'main.ts');
+		dirs.push(root);
+		mkdirSync(join(root, 'src'), { recursive: true });
+		writeFileSync(file, 'export const value = 1;\n');
+
+		expect(find_workspace_root(file, '/fallback')).toBe('/fallback');
 	});
 });
 

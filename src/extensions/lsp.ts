@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import {
 	file_path_to_uri,
 	LspClient,
+	LspClientStartError,
 	type LspClientOptions,
 	type LspDiagnostic,
 	type LspDocumentSymbol,
@@ -19,6 +20,7 @@ import {
 } from '../lsp/client.js';
 import {
 	detect_language,
+	find_workspace_root,
 	get_server_config,
 	language_id_for_file,
 	list_supported_languages,
@@ -27,9 +29,56 @@ import {
 interface ServerState {
 	client: LspClientLike;
 	language: string;
+	workspace_root: string;
 	root_uri: string;
 	command: string;
+	install_hint?: string;
 }
+
+interface LspToolErrorDetails {
+	kind:
+		| 'unsupported_language'
+		| 'server_start_failed'
+		| 'tool_execution_failed';
+	file: string;
+	message: string;
+	language?: string;
+	command?: string;
+	workspace_root?: string;
+	install_hint?: string;
+	code?: string;
+}
+
+class LspToolError extends Error {
+	details: LspToolErrorDetails;
+
+	constructor(details: LspToolErrorDetails) {
+		super(details.message);
+		this.name = 'LspToolError';
+		this.details = details;
+	}
+}
+
+const SYMBOL_KIND_LABELS: Record<number, string> = {
+	2: 'module',
+	3: 'namespace',
+	5: 'class',
+	6: 'method',
+	7: 'property',
+	8: 'field',
+	9: 'constructor',
+	11: 'interface',
+	12: 'function',
+	13: 'variable',
+	14: 'constant',
+	23: 'struct',
+	24: 'event',
+};
+
+const SYMBOL_KIND_NAMES = Object.values(SYMBOL_KIND_LABELS);
+const SYMBOL_KIND_SCHEMA = Type.Union(
+	SYMBOL_KIND_NAMES.map((name) => Type.Literal(name)),
+);
 
 export interface LspClientLike {
 	start(): Promise<void>;
@@ -71,33 +120,52 @@ export function create_lsp_extension(
 
 	return async function lsp(pi: ExtensionAPI) {
 		const cwd = options.cwd?.() ?? process.cwd();
-		const root_uri = file_path_to_uri(cwd);
-		const clients_by_language = new Map<string, ServerState>();
-		const failed_languages = new Map<string, string>();
+		const clients_by_server = new Map<string, ServerState>();
+		const failed_servers = new Map<string, LspToolErrorDetails>();
 
 		const resolve_abs = (file: string): string =>
 			isAbsolute(file) ? file : resolve(cwd, file);
+		const server_key = (
+			language: string,
+			workspace_root: string,
+		): string => `${language}\u0000${workspace_root}`;
+		const make_tool_result = (
+			text: string,
+			details: unknown = {},
+		) => ({
+			content: [{ type: 'text' as const, text }],
+			details,
+		});
+		const make_tool_error = (details: LspToolErrorDetails) =>
+			make_tool_result(format_tool_error(details), {
+				ok: false,
+				error: details,
+			});
 
 		const clear_language_state = async (
 			language?: string,
 		): Promise<void> => {
-			if (language) {
-				const state = clients_by_language.get(language);
-				if (state) {
-					await state.client.stop();
-					clients_by_language.delete(language);
-				}
-				failed_languages.delete(language);
-				return;
+			const states = language
+				? Array.from(clients_by_server.entries()).filter(
+						([, state]) => state.language === language,
+					)
+				: Array.from(clients_by_server.entries());
+			await Promise.allSettled(
+				states.map(([, state]) => state.client.stop()),
+			);
+			for (const [key] of states) {
+				clients_by_server.delete(key);
 			}
 
-			await Promise.allSettled(
-				Array.from(clients_by_language.values()).map((state) =>
-					state.client.stop(),
-				),
-			);
-			clients_by_language.clear();
-			failed_languages.clear();
+			if (!language) {
+				failed_servers.clear();
+				return;
+			}
+			for (const [key, failure] of failed_servers.entries()) {
+				if (failure.language === language) {
+					failed_servers.delete(key);
+				}
+			}
 		};
 
 		const get_or_start_client = async (
@@ -105,15 +173,21 @@ export function create_lsp_extension(
 		): Promise<ServerState | undefined> => {
 			const language = detect_language(file_path);
 			if (!language) return undefined;
-			const existing = clients_by_language.get(language);
+			const workspace_root = find_workspace_root(file_path, cwd);
+			const key = server_key(language, workspace_root);
+			const existing = clients_by_server.get(key);
 			if (existing) return existing;
-			if (failed_languages.has(language)) {
-				throw new Error(failed_languages.get(language)!);
+			const failed = failed_servers.get(key);
+			if (failed) {
+				throw new LspToolError(failed);
 			}
 
-			const server_config = get_server_config(language, cwd);
+			const server_config = get_server_config(
+				language,
+				workspace_root,
+			);
 			if (!server_config) return undefined;
-
+			const root_uri = file_path_to_uri(workspace_root);
 			const client = create_client({
 				command: server_config.command,
 				args: server_config.args,
@@ -124,21 +198,28 @@ export function create_lsp_extension(
 			try {
 				await client.start();
 			} catch (error) {
-				const message =
-					error instanceof Error ? error.message : String(error);
-				const failure = `Failed to start ${server_config.command} for ${language}: ${message}. Install the language server and ensure it is available.`;
-				failed_languages.set(language, failure);
-				throw new Error(failure);
+				const failure = to_lsp_tool_error(
+					file_path,
+					language,
+					workspace_root,
+					server_config.command,
+					server_config.install_hint,
+					error,
+				);
+				failed_servers.set(key, failure);
+				throw new LspToolError(failure);
 			}
 
 			const state: ServerState = {
 				client,
 				language,
+				workspace_root,
 				root_uri,
 				command: server_config.command,
+				install_hint: server_config.install_hint,
 			};
-			clients_by_language.set(language, state);
-			failed_languages.delete(language);
+			clients_by_server.set(key, state);
+			failed_servers.delete(key);
 			return state;
 		};
 
@@ -169,6 +250,78 @@ export function create_lsp_extension(
 			return { abs, uri, state };
 		};
 
+		const resolve_file_state = async (file: string) => {
+			const abs = resolve_abs(file);
+			try {
+				const result = await get_file_state(abs);
+				if (!result) {
+					return {
+						ok: false as const,
+						error: {
+							kind: 'unsupported_language' as const,
+							file: abs,
+							message: `No language server configured for ${abs}`,
+						},
+					};
+				}
+				return {
+					ok: true as const,
+					result,
+				};
+			} catch (error) {
+				if (error instanceof LspToolError) {
+					return {
+						ok: false as const,
+						error: error.details,
+					};
+				}
+				return {
+					ok: false as const,
+					error: {
+						kind: 'tool_execution_failed' as const,
+						file: abs,
+						message:
+							error instanceof Error ? error.message : String(error),
+					},
+				};
+			}
+		};
+
+		const with_file_state = async (
+			file: string,
+			run: (result: {
+				abs: string;
+				uri: string;
+				state: ServerState;
+			}) => Promise<string>,
+		) => {
+			const resolved = await resolve_file_state(file);
+			if (!resolved.ok) {
+				return make_tool_error(resolved.error);
+			}
+			const { result } = resolved;
+			try {
+				const text = await run(result);
+				return make_tool_result(text, {
+					ok: true,
+					language: result.state.language,
+					command: result.state.command,
+					workspace_root: result.state.workspace_root,
+				});
+			} catch (error) {
+				return make_tool_error(
+					to_lsp_tool_error(
+						result.abs,
+						result.state.language,
+						result.state.workspace_root,
+						result.state.command,
+						result.state.install_hint,
+						error,
+					),
+				);
+			}
+		};
+
 		pi.registerTool(
 			defineTool({
 				name: 'lsp_diagnostics',
@@ -187,34 +340,142 @@ export function create_lsp_extension(
 						}),
 					),
 				}),
+				execute: async (_id, params) =>
+					with_file_state(params.file, async (result) => {
+						const diagnostics =
+							await result.state.client.wait_for_diagnostics(
+								result.uri,
+								params.wait_ms ?? 1500,
+							);
+						return format_diagnostics(result.abs, diagnostics);
+					}),
+			}),
+		);
+
+		pi.registerTool(
+			defineTool({
+				name: 'lsp_diagnostics_many',
+				label: 'LSP: diagnostics many',
+				description:
+					'Get language server diagnostics for multiple files in one call. Useful for package-level sweeps and summarization.',
+				parameters: Type.Object({
+					files: Type.Array(Type.String(), {
+						minItems: 1,
+						maxItems: 100,
+						description:
+							'Files to check (relative to cwd or absolute).',
+					}),
+					wait_ms: Type.Optional(
+						Type.Number({
+							description:
+								'Max ms to wait for diagnostics after opening each file. Default 1500.',
+						}),
+					),
+				}),
 				execute: async (_id, params) => {
-					const result = await get_file_state(params.file);
-					if (!result) {
-						return {
-							content: [
-								{
-									type: 'text' as const,
-									text: `No language server configured for ${resolve_abs(params.file)}`,
-								},
-							],
-							details: {},
-						};
-					}
-					const diagnostics =
-						await result.state.client.wait_for_diagnostics(
-							result.uri,
-							params.wait_ms ?? 1500,
+					const results = await Promise.all(
+						params.files.map((file) => resolve_file_state(file)),
+					);
+					const lines: string[] = [];
+					let diagnostic_count = 0;
+					let clean_count = 0;
+					let error_count = 0;
+
+					for (const resolved of results) {
+						if (!resolved.ok) {
+							error_count += 1;
+							lines.push(format_tool_error(resolved.error));
+							continue;
+						}
+						const diagnostics =
+							await resolved.result.state.client.wait_for_diagnostics(
+								resolved.result.uri,
+								params.wait_ms ?? 1500,
+							);
+						diagnostic_count += diagnostics.length;
+						if (diagnostics.length === 0) {
+							clean_count += 1;
+						}
+						lines.push(
+							format_diagnostics(resolved.result.abs, diagnostics),
 						);
-					return {
-						content: [
-							{
-								type: 'text' as const,
-								text: format_diagnostics(result.abs, diagnostics),
-							},
-						],
-						details: {},
-					};
+					}
+
+					return make_tool_result(
+						[
+							`Checked ${params.files.length} file(s): ${diagnostic_count} diagnostic(s), ${clean_count} clean, ${error_count} error(s)`,
+							...lines,
+						].join('\n\n'),
+						{
+							ok: error_count === 0,
+							checked: params.files.length,
+							diagnostic_count,
+							clean_count,
+							error_count,
+						},
+					);
 				},
+			}),
+		);
+
+		pi.registerTool(
+			defineTool({
+				name: 'lsp_find_symbol',
+				label: 'LSP: find symbol',
+				description:
+					'Find symbols in a file by name or detail text using document symbols. Supports exact matching, kind filters, and top-level-only mode.',
+				parameters: Type.Object({
+					file: Type.String(),
+					query: Type.String({
+						description:
+							'Substring to match against symbol names/details.',
+					}),
+					max_results: Type.Optional(
+						Type.Number({
+							description:
+								'Max number of matches to return. Default 20.',
+						}),
+					),
+					top_level_only: Type.Optional(
+						Type.Boolean({
+							description:
+								'Only match top-level symbols. Default false.',
+						}),
+					),
+					exact_match: Type.Optional(
+						Type.Boolean({
+							description:
+								'Match whole symbol names/details exactly instead of substring matching. Default false.',
+						}),
+					),
+					kinds: Type.Optional(
+						Type.Array(SYMBOL_KIND_SCHEMA, {
+							minItems: 1,
+							maxItems: SYMBOL_KIND_NAMES.length,
+							description: 'Restrict matches to these symbol kinds.',
+						}),
+					),
+				}),
+				execute: async (_id, params) =>
+					with_file_state(params.file, async (result) => {
+						const symbols =
+							await result.state.client.document_symbols(result.uri);
+						const matches = find_symbol_matches(
+							symbols,
+							params.query,
+							{
+								max_results: params.max_results ?? 20,
+								top_level_only: params.top_level_only ?? false,
+								exact_match: params.exact_match ?? false,
+								kinds: new Set(params.kinds ?? []),
+							},
+						);
+						return format_symbol_matches(
+							result.abs,
+							params.query,
+							matches,
+						);
+					}),
 			}),
 		);
 
@@ -233,33 +494,17 @@ export function create_lsp_extension(
 						description: 'Zero-based character offset.',
 					}),
 				}),
-				execute: async (_id, params) => {
-					const result = await get_file_state(params.file);
-					if (!result) {
-						return {
-							content: [
-								{
-									type: 'text' as const,
-									text: `No language server configured for ${resolve_abs(params.file)}`,
-								},
-							],
-							details: {},
-						};
-					}
-					const hover = await result.state.client.hover(result.uri, {
-						line: params.line,
-						character: params.character,
-					});
-					return {
-						content: [
+				execute: async (_id, params) =>
+					with_file_state(params.file, async (result) => {
+						const hover = await result.state.client.hover(
+							result.uri,
 							{
-								type: 'text' as const,
-								text: format_hover(hover),
+								line: params.line,
+								character: params.character,
 							},
-						],
-						details: {},
-					};
-				},
+						);
+						return format_hover(hover);
+					}),
 			}),
 		);
 
@@ -274,39 +519,20 @@ export function create_lsp_extension(
 					line: Type.Number(),
 					character: Type.Number(),
 				}),
-				execute: async (_id, params) => {
-					const result = await get_file_state(params.file);
-					if (!result) {
-						return {
-							content: [
-								{
-									type: 'text' as const,
-									text: `No language server configured for ${resolve_abs(params.file)}`,
-								},
-							],
-							details: {},
-						};
-					}
-					const locations = await result.state.client.definition(
-						result.uri,
-						{
-							line: params.line,
-							character: params.character,
-						},
-					);
-					return {
-						content: [
+				execute: async (_id, params) =>
+					with_file_state(params.file, async (result) => {
+						const locations = await result.state.client.definition(
+							result.uri,
 							{
-								type: 'text' as const,
-								text: format_locations(
-									locations,
-									'No definition found.',
-								),
+								line: params.line,
+								character: params.character,
 							},
-						],
-						details: {},
-					};
-				},
+						);
+						return format_locations(
+							locations,
+							'No definition found.',
+						);
+					}),
 			}),
 		);
 
@@ -322,37 +548,21 @@ export function create_lsp_extension(
 					character: Type.Number(),
 					include_declaration: Type.Optional(Type.Boolean()),
 				}),
-				execute: async (_id, params) => {
-					const result = await get_file_state(params.file);
-					if (!result) {
-						return {
-							content: [
-								{
-									type: 'text' as const,
-									text: `No language server configured for ${resolve_abs(params.file)}`,
-								},
-							],
-							details: {},
-						};
-					}
-					const locations = await result.state.client.references(
-						result.uri,
-						{ line: params.line, character: params.character },
-						params.include_declaration ?? true,
-					);
-					return {
-						content: [
+				execute: async (_id, params) =>
+					with_file_state(params.file, async (result) => {
+						const locations = await result.state.client.references(
+							result.uri,
 							{
-								type: 'text' as const,
-								text: format_locations(
-									locations,
-									'No references found.',
-								),
+								line: params.line,
+								character: params.character,
 							},
-						],
-						details: {},
-					};
-				},
+							params.include_declaration ?? true,
+						);
+						return format_locations(
+							locations,
+							'No references found.',
+						);
+					}),
 			}),
 		);
 
@@ -365,32 +575,12 @@ export function create_lsp_extension(
 				parameters: Type.Object({
 					file: Type.String(),
 				}),
-				execute: async (_id, params) => {
-					const result = await get_file_state(params.file);
-					if (!result) {
-						return {
-							content: [
-								{
-									type: 'text' as const,
-									text: `No language server configured for ${resolve_abs(params.file)}`,
-								},
-							],
-							details: {},
-						};
-					}
-					const symbols = await result.state.client.document_symbols(
-						result.uri,
-					);
-					return {
-						content: [
-							{
-								type: 'text' as const,
-								text: format_document_symbols(result.abs, symbols),
-							},
-						],
-						details: {},
-					};
-				},
+				execute: async (_id, params) =>
+					with_file_state(params.file, async (result) => {
+						const symbols =
+							await result.state.client.document_symbols(result.uri);
+						return format_document_symbols(result.abs, symbols);
+					}),
 			}),
 		);
 
@@ -426,8 +616,8 @@ export function create_lsp_extension(
 					args,
 					ctx,
 					cwd,
-					clients_by_language,
-					failed_languages,
+					clients_by_server,
+					failed_servers,
 					clear_language_state,
 				);
 			},
@@ -445,8 +635,8 @@ async function handle_lsp_command(
 	args: string,
 	ctx: ExtensionCommandContext,
 	cwd: string,
-	clients_by_language: Map<string, ServerState>,
-	failed_languages: Map<string, string>,
+	clients_by_server: Map<string, ServerState>,
+	failed_servers: Map<string, LspToolErrorDetails>,
 	clear_language_state: (language?: string) => Promise<void>,
 ): Promise<void> {
 	const parts = args.trim() ? args.trim().split(/\s+/, 2) : [];
@@ -458,8 +648,8 @@ async function handle_lsp_command(
 			ctx.ui.notify(
 				format_status_lines(
 					cwd,
-					clients_by_language,
-					failed_languages,
+					clients_by_server,
+					failed_servers,
 				).join('\n'),
 			);
 			return;
@@ -490,25 +680,43 @@ async function handle_lsp_command(
 
 function format_status_lines(
 	cwd: string,
-	clients_by_language: Map<string, ServerState>,
-	failed_languages: Map<string, string>,
+	clients_by_server: Map<string, ServerState>,
+	failed_servers: Map<string, LspToolErrorDetails>,
 ): string[] {
 	const lines: string[] = [];
+	const active_languages = new Set<string>();
+	const running_states = Array.from(clients_by_server.values()).sort(
+		(a, b) =>
+			a.language.localeCompare(b.language) ||
+			a.workspace_root.localeCompare(b.workspace_root),
+	);
+	for (const running of running_states) {
+		active_languages.add(running.language);
+		lines.push(
+			`${running.language}: running (ready=${running.client.is_ready()}) — ${running.command} [workspace ${running.workspace_root}]`,
+		);
+	}
+
+	const failures = Array.from(failed_servers.values()).sort(
+		(a, b) =>
+			(a.language ?? '').localeCompare(b.language ?? '') ||
+			(a.workspace_root ?? '').localeCompare(b.workspace_root ?? ''),
+	);
+	for (const failure of failures) {
+		if (failure.language) {
+			active_languages.add(failure.language);
+		}
+		const workspace = failure.workspace_root
+			? ` [workspace ${failure.workspace_root}]`
+			: '';
+		const language = failure.language ?? 'unknown';
+		lines.push(
+			`${language}: failed — ${failure.message}${workspace}`,
+		);
+	}
+
 	for (const language of list_supported_languages()) {
-		const running = clients_by_language.get(language);
-		if (running) {
-			lines.push(
-				`${language}: running (ready=${running.client.is_ready()}) — ${running.command}`,
-			);
-			continue;
-		}
-
-		const failed = failed_languages.get(language);
-		if (failed) {
-			lines.push(`${language}: failed — ${failed}`);
-			continue;
-		}
-
+		if (active_languages.has(language)) continue;
 		const config = get_server_config(language, cwd);
 		if (config) {
 			lines.push(`${language}: idle — ${config.command}`);
@@ -517,6 +725,72 @@ function format_status_lines(
 	return lines.length > 0
 		? lines
 		: ['No language servers configured for this project.'];
+}
+
+function to_lsp_tool_error(
+	file: string,
+	language: string,
+	workspace_root: string,
+	command: string,
+	install_hint: string | undefined,
+	error: unknown,
+): LspToolErrorDetails {
+	if (error instanceof LspToolError) {
+		return error.details;
+	}
+	if (error instanceof LspClientStartError) {
+		const missing_binary = error.code === 'ENOENT';
+		return {
+			kind: 'server_start_failed',
+			file,
+			language,
+			workspace_root,
+			command,
+			install_hint,
+			code: error.code,
+			message: missing_binary
+				? `command "${command}" not found`
+				: error.message,
+		};
+	}
+	return {
+		kind: 'tool_execution_failed',
+		file,
+		language,
+		workspace_root,
+		command,
+		install_hint,
+		message: error instanceof Error ? error.message : String(error),
+		code:
+			typeof error === 'object' &&
+			error !== null &&
+			'code' in error &&
+			typeof (error as { code?: unknown }).code === 'string'
+				? (error as { code: string }).code
+				: undefined,
+	};
+}
+
+function format_tool_error(details: LspToolErrorDetails): string {
+	if (details.kind === 'unsupported_language') {
+		return details.message;
+	}
+	const lines = [
+		details.language
+			? `${details.language} LSP unavailable for ${details.file}`
+			: `LSP request failed for ${details.file}`,
+		`Reason: ${details.message}`,
+	];
+	if (details.command) {
+		lines.push(`Command: ${details.command}`);
+	}
+	if (details.workspace_root) {
+		lines.push(`Workspace: ${details.workspace_root}`);
+	}
+	if (details.install_hint) {
+		lines.push(`Hint: ${details.install_hint}`);
+	}
+	return lines.join('\n');
 }
 
 function severity_label(severity: LspDiagnostic['severity']): string {
@@ -596,6 +870,77 @@ function format_document_symbols(
 	return lines.join('\n');
 }
 
+function find_symbol_matches(
+	symbols: LspDocumentSymbol[],
+	query: string,
+	options: {
+		max_results: number;
+		top_level_only: boolean;
+		exact_match: boolean;
+		kinds: ReadonlySet<string>;
+	},
+): Array<{ symbol: LspDocumentSymbol; depth: number }> {
+	const normalized = query.trim().toLowerCase();
+	if (!normalized) return [];
+	const matches: Array<{ symbol: LspDocumentSymbol; depth: number }> =
+		[];
+	const matches_query = (symbol: LspDocumentSymbol): boolean => {
+		const values = [symbol.name, symbol.detail ?? ''].map((value) =>
+			value.trim().toLowerCase(),
+		);
+		return options.exact_match
+			? values.some((value) => value === normalized)
+			: values.some((value) => value.includes(normalized));
+	};
+	const matches_kind = (symbol: LspDocumentSymbol): boolean => {
+		if (options.kinds.size === 0) return true;
+		return options.kinds.has(symbol_kind_label(symbol.kind));
+	};
+	const visit = (
+		entries: LspDocumentSymbol[],
+		depth: number,
+	): void => {
+		for (const symbol of entries) {
+			if (matches_kind(symbol) && matches_query(symbol)) {
+				matches.push({ symbol, depth });
+				if (matches.length >= options.max_results) {
+					return;
+				}
+			}
+			if (!options.top_level_only && symbol.children?.length) {
+				visit(symbol.children, depth + 1);
+				if (matches.length >= options.max_results) {
+					return;
+				}
+			}
+		}
+	};
+	visit(symbols, 1);
+	return matches;
+}
+
+function format_symbol_matches(
+	file: string,
+	query: string,
+	matches: Array<{ symbol: LspDocumentSymbol; depth: number }>,
+): string {
+	if (matches.length === 0) {
+		return `${file}: no symbols matching "${query}"`;
+	}
+	const lines = [
+		`${file}: ${matches.length} symbol match(es) for "${query}"`,
+	];
+	for (const { symbol, depth } of matches) {
+		const indent = '  '.repeat(depth);
+		const detail = symbol.detail ? ` — ${symbol.detail}` : '';
+		const range = `${symbol.range.start.line + 1}:${symbol.range.start.character + 1}`;
+		lines.push(
+			`${indent}${symbol_kind_label(symbol.kind)} ${symbol.name}${detail} @ ${range}`,
+		);
+	}
+	return lines.join('\n');
+}
+
 function append_symbol_lines(
 	lines: string[],
 	symbols: LspDocumentSymbol[],
@@ -615,22 +960,7 @@ function append_symbol_lines(
 }
 
 function symbol_kind_label(kind: number): string {
-	const labels: Record<number, string> = {
-		2: 'module',
-		3: 'namespace',
-		5: 'class',
-		6: 'method',
-		7: 'property',
-		8: 'field',
-		9: 'constructor',
-		11: 'interface',
-		12: 'function',
-		13: 'variable',
-		14: 'constant',
-		23: 'struct',
-		24: 'event',
-	};
-	return labels[kind] ?? 'symbol';
+	return SYMBOL_KIND_LABELS[kind] ?? 'symbol';
 }
 
 function file_url_to_path_or_value(uri: string): string {

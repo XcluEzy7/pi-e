@@ -1,8 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import {
+	LspClient,
+	LspClientStartError,
 	normalize_document_symbol_result,
 	normalize_location_result,
 } from './client.js';
+
+describe('LspClient.start', () => {
+	it('rejects quickly with a typed error when the server binary is missing', async () => {
+		const client = new LspClient({
+			command: '__my_pi_missing_lsp_binary__',
+			args: ['--stdio'],
+			root_uri: 'file:///repo',
+			language_id_for_uri: () => 'typescript',
+			request_timeout_ms: 50,
+		});
+
+		await expect(client.start()).rejects.toMatchObject({
+			name: 'LspClientStartError',
+			command: '__my_pi_missing_lsp_binary__',
+			code: 'ENOENT',
+		});
+		await expect(client.start()).rejects.toBeInstanceOf(
+			LspClientStartError,
+		);
+	});
+});
 
 describe('normalize_location_result', () => {
 	it('keeps regular locations as-is', () => {
