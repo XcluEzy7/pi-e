@@ -2,26 +2,30 @@
 // The model uses `npx pirecall` via bash directly — no custom tools needed
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
-import { execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 const DEFAULT_DB_PATH = join(process.env.HOME!, '.pi', 'pirecall.db');
 
+function sync_recall_db_in_background(): void {
+	if (!existsSync(DEFAULT_DB_PATH)) return;
+
+	try {
+		const proc = spawn('npx', ['pirecall', 'sync', '--json'], {
+			stdio: 'ignore',
+		});
+		proc.unref();
+	} catch {
+		// Non-critical — db may just not have new data
+	}
+}
+
 // Default export for Pi Package / additionalExtensionPaths loading
 export default async function recall(pi: ExtensionAPI) {
-	// Sync on startup if db exists
-	if (existsSync(DEFAULT_DB_PATH)) {
-		try {
-			execFileSync('npx', ['pirecall', 'sync', '--json'], {
-				encoding: 'utf-8',
-				timeout: 30_000,
-				stdio: ['pipe', 'pipe', 'pipe'],
-			});
-		} catch {
-			// Non-critical — db may just not have new data
-		}
-	}
+	pi.on('session_start', async () => {
+		sync_recall_db_in_background();
+	});
 
 	// System prompt hint so the model knows pirecall exists
 	pi.on(
