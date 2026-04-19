@@ -10,6 +10,7 @@ interface SecretPattern {
 
 const SECRET_PATTERNS: SecretPattern[] = [
 	{ name: 'AWS Access Key', pattern: /AKIA[A-Z0-9]{16}/g },
+	{ name: 'AWS Temp Access Key', pattern: /ASIA[A-Z0-9]{16}/g },
 	{
 		name: 'AWS Secret Key',
 		pattern:
@@ -75,6 +76,10 @@ const SECRET_PATTERNS: SecretPattern[] = [
 		name: 'GitHub Token',
 		pattern: /gh[pousr]_[a-zA-Z0-9]{36,}/g,
 	},
+	{
+		name: 'GitHub Fine-grained PAT',
+		pattern: /github_pat_[a-zA-Z0-9_]{20,}/g,
+	},
 ];
 
 function redact(text: string): { redacted: string; count: number } {
@@ -82,7 +87,6 @@ function redact(text: string): { redacted: string; count: number } {
 	let result = text;
 
 	for (const sp of SECRET_PATTERNS) {
-		// Reset lastIndex for global regexes
 		sp.pattern.lastIndex = 0;
 		result = result.replace(sp.pattern, (match) => {
 			count++;
@@ -94,11 +98,9 @@ function redact(text: string): { redacted: string; count: number } {
 	return { redacted: result, count };
 }
 
-// Default export for Pi Package / additionalExtensionPaths loading
 export default async function filter_output(pi: ExtensionAPI) {
 	let totalRedacted = 0;
 
-	// Intercept tool results to redact secrets before the LLM sees them
 	pi.on('tool_result' as const, async (event: any) => {
 		if (!event.content) return;
 

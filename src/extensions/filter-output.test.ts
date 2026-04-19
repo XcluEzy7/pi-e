@@ -7,6 +7,7 @@ interface SecretPattern {
 
 const SECRET_PATTERNS: SecretPattern[] = [
 	{ name: 'AWS Access Key', pattern: /AKIA[A-Z0-9]{16}/g },
+	{ name: 'AWS Temp Access Key', pattern: /ASIA[A-Z0-9]{16}/g },
 	{
 		name: 'AWS Secret Key',
 		pattern:
@@ -27,6 +28,11 @@ const SECRET_PATTERNS: SecretPattern[] = [
 	{
 		name: 'Stripe Test Key',
 		pattern: /sk_test_[a-zA-Z0-9]{20,}/g,
+	},
+	{
+		name: 'Hetzner Token',
+		pattern:
+			/(?:HCLOUD_TOKEN|hcloud_token|token)\s*[:=]\s*["']?[a-f0-9]{64}\b/g,
 	},
 	{
 		name: 'Private Key',
@@ -52,12 +58,24 @@ const SECRET_PATTERNS: SecretPattern[] = [
 		pattern: /tvly-[a-zA-Z0-9_-]{20,}/g,
 	},
 	{
+		name: 'Kagi API Key',
+		pattern: /[a-zA-Z0-9_-]{40,}\.[a-zA-Z0-9_-]{40,}/g,
+	},
+	{
+		name: 'Brave API Key',
+		pattern: /BSA[A-Z0-9]{20,}/g,
+	},
+	{
 		name: 'Firecrawl API Key',
 		pattern: /fc-[a-f0-9]{32}/g,
 	},
 	{
 		name: 'GitHub Token',
 		pattern: /gh[pousr]_[a-zA-Z0-9]{36,}/g,
+	},
+	{
+		name: 'GitHub Fine-grained PAT',
+		pattern: /github_pat_[a-zA-Z0-9_]{20,}/g,
 	},
 ];
 
@@ -84,6 +102,14 @@ describe('redact', () => {
 		expect(count).toBe(1);
 		expect(redacted).toContain('[REDACTED:AWS Access Key]');
 		expect(redacted).not.toContain('AKIA1234567890CANARY');
+	});
+
+	it('redacts AWS temp access keys', () => {
+		const input = 'key: ASIA1234567890CANARY';
+		const { redacted, count } = redact(input);
+		expect(count).toBe(1);
+		expect(redacted).toContain('[REDACTED:AWS Temp Access Key]');
+		expect(redacted).not.toContain('ASIA1234567890CANARY');
 	});
 
 	it('redacts uppercase AWS secret env vars', () => {
@@ -134,6 +160,14 @@ describe('redact', () => {
 		expect(redacted).toContain('[REDACTED:Stripe Live Key]');
 	});
 
+	it('redacts Hetzner tokens', () => {
+		const input = `HCLOUD_TOKEN=${'a'.repeat(64)}`;
+		const { redacted, count } = redact(input);
+		expect(count).toBe(1);
+		expect(redacted).toContain('[REDACTED:Hetzner Token]');
+		expect(redacted).not.toContain('a'.repeat(64));
+	});
+
 	it('redacts full private key blocks', () => {
 		const input = `-----BEGIN PRIVATE KEY-----\nQ0FOQVJZX1BSSVZBVEVfS0VZX0JMT0NLX0xJTkVfMDAx\nQ0FOQVJZX1BSSVZBVEVfS0VZX0JMT0NLX0xJTkVfMDAy\n-----END PRIVATE KEY-----`;
 		const { redacted, count } = redact(input);
@@ -182,6 +216,20 @@ describe('redact', () => {
 		expect(redacted).toContain('[REDACTED:Tavily API Key]');
 	});
 
+	it('redacts Kagi API keys', () => {
+		const input = `${'a'.repeat(40)}.${'b'.repeat(40)}`;
+		const { redacted, count } = redact(input);
+		expect(count).toBe(1);
+		expect(redacted).toContain('[REDACTED:Kagi API Key]');
+	});
+
+	it('redacts Brave API keys', () => {
+		const input = 'BSA' + 'A'.repeat(20);
+		const { redacted, count } = redact(input);
+		expect(count).toBe(1);
+		expect(redacted).toContain('[REDACTED:Brave API Key]');
+	});
+
 	it('redacts Firecrawl API keys', () => {
 		const input = 'fc-e3b0c44298fc1c149afbf4c8996fb924';
 		const { redacted, count } = redact(input);
@@ -195,6 +243,13 @@ describe('redact', () => {
 		const { redacted, count } = redact(input);
 		expect(count).toBe(1);
 		expect(redacted).toContain('[REDACTED:GitHub Token]');
+	});
+
+	it('redacts GitHub fine-grained PATs', () => {
+		const input = 'github_pat_' + 'A'.repeat(30);
+		const { redacted, count } = redact(input);
+		expect(count).toBe(1);
+		expect(redacted).toContain('[REDACTED:GitHub Fine-grained PAT]');
 	});
 
 	it('redacts multiple secrets in one string', () => {
