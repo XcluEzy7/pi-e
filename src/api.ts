@@ -27,6 +27,7 @@ import filter_output_extension from './extensions/filter-output.js';
 import handoff_extension from './extensions/handoff.js';
 import lsp_extension from './extensions/lsp.js';
 import mcp_extension from './extensions/mcp.js';
+import { create_telemetry_extension } from './extensions/otel.js';
 import prompt_presets_extension from './extensions/prompt-presets.js';
 import recall_extension from './extensions/recall.js';
 import skills_extension from './extensions/skills.js';
@@ -34,6 +35,7 @@ import { create_skills_manager } from './skills/manager.js';
 
 export interface CreateMyPiOptions {
 	cwd?: string;
+	agent_dir?: string;
 	extensions?: string[];
 	extensionFactories?: ExtensionFactory[];
 	mcp?: boolean;
@@ -44,6 +46,8 @@ export interface CreateMyPiOptions {
 	recall?: boolean;
 	prompt_presets?: boolean;
 	lsp?: boolean;
+	telemetry?: boolean;
+	telemetry_db_path?: string;
 	model?: string;
 	system_prompt?: string;
 	append_system_prompt?: string;
@@ -65,6 +69,11 @@ const BUILTIN_EXTENSION_FACTORIES: Record<
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_THEME_DIR = resolve(MODULE_DIR, '..', 'themes');
+const PI_AGENT_DIR_ENV = 'PI_CODING_AGENT_DIR';
+
+function resolve_agent_dir(cwd: string, agent_dir?: string): string {
+	return agent_dir ? resolve(cwd, agent_dir) : getAgentDir();
+}
 
 function get_force_disabled_builtins(
 	options: Pick<
@@ -134,6 +143,7 @@ function create_extensions_override(
 export async function create_my_pi(options: CreateMyPiOptions = {}) {
 	const {
 		cwd = process.cwd(),
+		agent_dir,
 		extensions = [],
 		extensionFactories: user_factories = [],
 		mcp = true,
@@ -144,10 +154,17 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 		recall = true,
 		prompt_presets = true,
 		lsp = true,
+		telemetry,
+		telemetry_db_path,
 		model,
 		system_prompt,
 		append_system_prompt,
 	} = options;
+
+	const effective_agent_dir = resolve_agent_dir(cwd, agent_dir);
+	if (agent_dir) {
+		process.env[PI_AGENT_DIR_ENV] = effective_agent_dir;
+	}
 
 	const resolved_extensions = extensions.map((p) => resolve(cwd, p));
 	const force_disabled = get_force_disabled_builtins({
@@ -161,6 +178,11 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 		lsp,
 	});
 	const managed_extension_factories: ExtensionFactory[] = [
+		create_telemetry_extension({
+			enabled: telemetry,
+			db_path: telemetry_db_path,
+			cwd,
+		}),
 		create_extensions_extension({ force_disabled }),
 		...BUILTIN_EXTENSIONS.map((extension) =>
 			create_builtin_extension_factory(
@@ -185,7 +207,10 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 	}) => {
 		const settings_manager = model
 			? (() => {
-					const sm = SettingsManager.create(runtime_cwd);
+					const sm = SettingsManager.create(
+						runtime_cwd,
+						effective_agent_dir,
+					);
 					sm.setDefaultModel(model);
 					return sm;
 				})()
@@ -193,6 +218,7 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 
 		const services = await createAgentSessionServices({
 			cwd: runtime_cwd,
+			agentDir: effective_agent_dir,
 			...(settings_manager
 				? { settingsManager: settings_manager }
 				: {}),
@@ -258,7 +284,7 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 
 	return createAgentSessionRuntime(create_runtime, {
 		cwd,
-		agentDir: getAgentDir(),
+		agentDir: effective_agent_dir,
 		sessionManager: SessionManager.create(cwd),
 	});
 }

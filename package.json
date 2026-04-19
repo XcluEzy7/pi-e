@@ -1,13 +1,17 @@
 {
 	"name": "my-pi",
 	"version": "0.0.10",
-	"description": "Personal pi coding agent wrapper with MCP tool integration",
+	"description": "Composable pi coding agent with MCP, LSP, agent chains, prompt presets, and local eval telemetry",
 	"keywords": [
 		"cli",
 		"coding-agent",
+		"evals",
+		"lsp",
 		"mcp",
 		"pi",
-		"pi-package"
+		"pi-package",
+		"sqlite",
+		"telemetry"
 	],
 	"homepage": "https://github.com/spences10/my-pi#readme",
 	"bugs": {
@@ -47,7 +51,8 @@
 		"test:watch": "vp test watch",
 		"changeset": "changeset",
 		"version": "changeset version",
-		"release": "pnpm run build && changeset publish"
+		"release": "pnpm run build && changeset publish",
+		"postbuild": "node ./scripts/copy-telemetry-schema.mjs"
 	},
 	"dependencies": {
 		"@mariozechner/pi-ai": "^0.67.68",

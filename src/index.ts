@@ -13,6 +13,14 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { create_my_pi } from './api.js';
 
+// Suppress node:sqlite ExperimentalWarning
+process.removeAllListeners('warning');
+process.on('warning', (warning) => {
+	if (warning.name !== 'ExperimentalWarning') {
+		console.warn(warning);
+	}
+});
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(
 	readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'),
@@ -63,6 +71,12 @@ function print_usage(): void {
 		'  my-pi -e a.ts -e b.ts            Stack multiple extensions',
 	);
 	console.log(
+		'  my-pi --telemetry --json "task"  Enable local SQLite telemetry',
+	);
+	console.log(
+		'  my-pi --agent-dir /tmp/pi-agent   Override auth/config/session dir',
+	);
+	console.log(
 		'  echo "prompt" | my-pi --json     Pipe stdin as prompt',
 	);
 	console.log(
@@ -78,7 +92,7 @@ const main = defineCommand({
 		name: 'my-pi',
 		version: pkg.version,
 		description:
-			'Composable pi coding agent with MCP tools and extension stacking',
+			'Composable pi coding agent with MCP, LSP, chains, presets, and local eval telemetry',
 	},
 	args: {
 		print: {
@@ -86,6 +100,12 @@ const main = defineCommand({
 			alias: 'P',
 			description: 'Print mode (non-interactive, one-shot)',
 			default: false,
+		},
+		'agent-dir': {
+			type: 'string',
+			description:
+				'Override Pi auth/config/session directory for this process',
+			required: false,
 		},
 		json: {
 			type: 'boolean',
@@ -137,6 +157,22 @@ const main = defineCommand({
 			type: 'boolean',
 			description: 'Disable LSP extension',
 			default: false,
+		},
+		telemetry: {
+			type: 'boolean',
+			description: 'Enable local SQLite telemetry for this process',
+			default: false,
+		},
+		'no-telemetry': {
+			type: 'boolean',
+			description: 'Disable local SQLite telemetry for this process',
+			default: false,
+		},
+		'telemetry-db': {
+			type: 'string',
+			description:
+				'Override telemetry database path for this process',
+			required: false,
 		},
 		model: {
 			type: 'string',
@@ -206,8 +242,22 @@ const main = defineCommand({
 			);
 		}
 
+		if (args.telemetry && args['no-telemetry']) {
+			console.error(
+				'Error: --telemetry and --no-telemetry cannot be used together.',
+			);
+			process.exit(1);
+		}
+
+		const telemetry_override = args.telemetry
+			? true
+			: args['no-telemetry']
+				? false
+				: undefined;
+
 		const runtime = await create_my_pi({
 			cwd,
+			agent_dir: args['agent-dir'],
 			extensions: extension_paths,
 			mcp: !args['no-builtin'] && !args['no-mcp'],
 			skills: !args['no-builtin'] && !args['no-skills'],
@@ -218,6 +268,8 @@ const main = defineCommand({
 			prompt_presets:
 				!args['no-builtin'] && !args['no-prompt-presets'],
 			lsp: !args['no-builtin'] && !args['no-lsp'],
+			telemetry: telemetry_override,
+			telemetry_db_path: args['telemetry-db'],
 			model: args.model,
 			system_prompt: args['system-prompt'],
 			append_system_prompt: args['append-system-prompt'],

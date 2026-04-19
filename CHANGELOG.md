@@ -4,12 +4,13 @@
 
 ### Patch Changes
 
-- 144e018: Fix LSP startup cancellation race, prevent stale server reuse after
-  restart, and add regression coverage.
-- 257a1b4: Improve LSP reliability, add Svelte support, workspace-aware
-  resolution, batched diagnostics, and symbol search tools.
-- 25576b6: Improve startup responsiveness by skipping eager usage boot,
-  backgrounding recall sync, and asynchronously initializing MCP
+- 144e018: Fix LSP startup cancellation race, prevent stale server
+  reuse after restart, and add regression coverage.
+- 257a1b4: Improve LSP reliability, add Svelte support,
+  workspace-aware resolution, batched diagnostics, and symbol search
+  tools.
+- 25576b6: Improve startup responsiveness by skipping eager usage
+  boot, backgrounding recall sync, and asynchronously initializing MCP
   connections.
 
 ## 0.0.9

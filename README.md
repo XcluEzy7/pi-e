@@ -4,17 +4,41 @@ Composable [pi](https://pi.dev) coding agent for humans and agents.
 
 Built on the
 [@mariozechner/pi-coding-agent](https://github.com/badlogic/pi-mono)
-SDK. Adds MCP server support, extension stacking, JSON output for
-agent consumption, and a programmatic API.
+SDK. Adds MCP server support, extension stacking, LSP tools, agent
+chains, prompt presets, local SQLite telemetry for evals, and a
+programmatic API.
 
 Extension stacking patterns inspired by
 [pi-vs-claude-code](https://github.com/disler/pi-vs-claude-code).
 
-## Setup
+## Features
+
+- **Pi-native CLI + SDK wrapper** — interactive TUI, print mode, JSON
+  mode, and programmatic runtime creation.
+- **MCP integration** — stdio and HTTP/streamable-HTTP servers from
+  `mcp.json`, auto-registered as Pi tools.
+- **Built-in LSP tools** — diagnostics, hover, definitions,
+  references, and document symbols via language servers.
+- **Agent chains** — sequential scout/plan style workflows defined in
+  `.pi/agents/agent-chain.yaml`.
+- **Managed skills** — discover, enable, disable, import, and sync
+  Pi-native skills.
+- **Prompt presets** — base presets plus additive prompt layers with
+  per-project persistence.
+- **Secret redaction** — redact API keys and other sensitive output
+  before the model sees tool results.
+- **Session handoff + recall** — export focused handoff markdown and
+  teach the model to use `pirecall` for prior-session context.
+- **Local telemetry** — optional SQLite telemetry for evals, tool
+  analysis, and operational debugging.
+- **Bundled themes + extension stacking** — ship defaults, then layer
+  extra project or ad-hoc extensions on top.
+
+## Get Started
 
 ```bash
-pnpm install
-pnpm run build
+pnpx my-pi@latest
+# or: npx my-pi@latest / bunx my-pi@latest
 ```
 
 ### API Keys
@@ -33,7 +57,7 @@ priority order):
 ### Interactive mode (full TUI)
 
 ```bash
-my-pi
+pnpx my-pi@latest
 ```
 
 Pi's full terminal UI with editor, `/commands`, model switching
@@ -42,25 +66,139 @@ Pi's full terminal UI with editor, `/commands`, model switching
 ### Print mode (one-shot)
 
 ```bash
-my-pi "your prompt here"
-my-pi -P "explicit print mode"
+pnpx my-pi@latest "your prompt here"
+pnpx my-pi@latest -P "explicit print mode"
+# or: npx my-pi@latest ... / bunx my-pi@latest ...
 ```
 
 ### JSON output (for agents)
 
 ```bash
-my-pi --json "list all TODO comments"
-echo "plan a login page" | my-pi --json
+pnpx my-pi@latest --json "list all TODO comments"
+echo "plan a login page" | pnpx my-pi@latest --json
 ```
 
 Outputs NDJSON events — one JSON object per line — for programmatic
 consumption by other agents or scripts.
 
+### Local telemetry (SQLite)
+
+Telemetry is **disabled by default**. When enabled, my-pi records
+operational telemetry for each run in a local SQLite database. This is
+intended for eval harnesses, latency analysis, tool failure analysis,
+and local debugging.
+
+```bash
+pnpx my-pi@latest --telemetry --json "solve this task"
+pnpx my-pi@latest --telemetry --telemetry-db ./tmp/evals.db --json "run case"
+```
+
+By default the database lives at:
+
+```text
+~/.pi/agent/telemetry.db
+```
+
+You can relocate the whole Pi auth/config/session directory for
+sandboxed or CI runs with either:
+
+```bash
+pnpx my-pi@latest --agent-dir /work/pi-agent --telemetry --json "run case"
+```
+
+or:
+
+```bash
+PI_CODING_AGENT_DIR=/work/pi-agent pnpx my-pi@latest --telemetry --json "run case"
+```
+
+Use the interactive command to inspect or persist the setting:
+
+```text
+/telemetry status
+/telemetry stats
+/telemetry query run=<eval-run-id> success=true limit=10
+/telemetry export ./tmp/eval-runs.json suite=smoke
+/telemetry on
+/telemetry off
+/telemetry path
+```
+
+Recommended eval env vars for correlation:
+
+- `MY_PI_EVAL_RUN_ID`
+- `MY_PI_EVAL_CASE_ID`
+- `MY_PI_EVAL_ATTEMPT`
+- `MY_PI_EVAL_SUITE`
+
+Recorded tables:
+
+- `runs`
+- `turns`
+- `tool_calls`
+- `provider_requests`
+
+Query and export helpers:
+
+- `/telemetry query ...` shows recent run summaries
+- `/telemetry export [path] ...` writes matching runs as JSON
+- supported filters: `run=` / `eval_run_id=`, `case=` /
+  `eval_case_id=`, `suite=` / `eval_suite=`,
+  `success=true|false|null`, `limit=<n>`
+- `/telemetry query` defaults to `limit=20`
+- `/telemetry export` auto-generates a timestamped JSON file when no
+  path is provided
+
+Schema notes:
+
+- source of truth: `src/extensions/telemetry-schema.sql`
+- current telemetry schema version: `1`
+- schema version is tracked with `PRAGMA user_version`
+- unversioned local telemetry databases are initialized/upgraded to v1
+  on open
+- newer unsupported schema versions fail fast instead of silently
+  downgrading
+- opens the database in WAL mode: `PRAGMA journal_mode = WAL`
+- waits up to 5s on lock contention: `PRAGMA busy_timeout = 5000`
+- packaged builds ship the schema as `dist/telemetry-schema.sql`
+
+CLI flags `--telemetry` and `--no-telemetry` override only the current
+process. `/telemetry on` and `/telemetry off` update the saved default
+for future sessions.
+
+### Sandbox / CI auth and config isolation
+
+If you run my-pi in containers, CI, or ephemeral sandboxes, changing
+`HOME` often hides the usual `~/.pi/agent/auth.json` credentials. Use
+a stable agent directory instead of relying on `HOME` alone.
+
+Recommended options:
+
+1. Pass provider API keys directly via environment variables.
+2. Set `--agent-dir /path/to/pi-agent` for the process.
+3. Or set `PI_CODING_AGENT_DIR=/path/to/pi-agent` in the environment.
+
+The agent directory holds Pi-managed state such as:
+
+- `auth.json`
+- `settings.json`
+- `sessions/`
+- `telemetry.db`
+- `telemetry.json`
+
+A practical sandbox command looks like:
+
+```bash
+PI_CODING_AGENT_DIR=/work/pi-agent \
+ANTHROPIC_API_KEY=... \
+pnpx my-pi@latest --telemetry --json "run eval case"
+```
+
 ### Extension stacking
 
 ```bash
-my-pi -e ./ext/damage-control.ts -e ./ext/tool-counter.ts
-my-pi --no-builtin -e ./ext/custom.ts "do something"
+pnpx my-pi@latest -e ./ext/damage-control.ts -e ./ext/tool-counter.ts
+pnpx my-pi@latest --no-builtin -e ./ext/custom.ts "do something"
 ```
 
 Stack arbitrary Pi extensions via `-e`. Use `--no-builtin` to skip all
@@ -85,8 +223,8 @@ via Pi settings JSON:
 ### Stdin piping
 
 ```bash
-echo "review this code" | my-pi
-cat plan.md | my-pi --json
+echo "review this code" | pnpx my-pi@latest
+cat plan.md | pnpx my-pi@latest --json
 ```
 
 When stdin is piped, it's read as the prompt and print mode runs
@@ -95,11 +233,13 @@ automatically.
 ### Programmatic API
 
 ```ts
-import { createMyPi, runPrintMode } from 'my-pi';
+import { create_my_pi, runPrintMode } from 'my-pi';
 
-const runtime = await createMyPi({
+const runtime = await create_my_pi({
+	agent_dir: './tmp/pi-agent',
 	extensions: ['./my-ext.ts'],
-	builtins: true,
+	telemetry: true,
+	telemetry_db_path: './tmp/evals.db',
 });
 await runPrintMode(runtime, {
 	mode: 'json',
@@ -201,6 +341,15 @@ In interactive mode:
 - `/preset reset <name>` — remove a project-local override and fall
   back to user/built-in if available
 - `/preset clear` — clear the active base preset and all layers
+- `/chain` — inspect or switch the active agent chain
+- `/agents` — list discovered agent definitions
+- `/lsp status|list|restart` — inspect or restart language server
+  state
+- `/redact-stats` — show how many secrets were redacted this session
+- `/handoff <task>` — export current context to a handoff markdown
+  file
+- `/telemetry status|stats|query|export|on|off|path` — inspect, query,
+  export, or toggle local SQLite telemetry
 
 ### How it works
 
@@ -298,6 +447,52 @@ for the same project via `~/.pi/agent/prompt-preset-state.json`.
 This repo also includes an example `.pi/presets.json` with sample base
 presets and layers.
 
+## LSP Integration
+
+The built-in LSP extension adds Pi tools for:
+
+- diagnostics
+- hover
+- definitions
+- references
+- document symbols
+
+You still need the underlying language server binaries installed.
+`my-pi` prefers project-local binaries from `node_modules/.bin` and
+otherwise falls back to whatever is on `PATH`.
+
+For the main TypeScript / JavaScript / Svelte workflow, install:
+
+```bash
+pnpm add -D typescript typescript-language-server svelte-language-server
+```
+
+That covers:
+
+- TypeScript / JavaScript via `typescript-language-server`
+- Svelte via `svelteserver`
+
+`my-pi` can also use other language servers if you already have them
+installed and available on `PATH`, including:
+
+- Python via `python-lsp-server`
+- Go via `gopls`
+- Rust via `rust-analyzer`
+- Ruby via `solargraph`
+- Java via `jdtls`
+- Lua via `lua-language-server`
+
+Use `/lsp status` to inspect active server state and
+`/lsp restart all` or `/lsp restart <language>` to clear cached
+clients.
+
+## Session Recall
+
+The recall extension nudges the model to use `npx pirecall` when the
+user references prior work or when historical project context would
+help. It also triggers a background `pirecall sync --json` on session
+start when the local recall database exists.
+
 ## Session Handoff
 
 Use `/handoff <task>` to export conversation context as a markdown
@@ -306,7 +501,7 @@ file that can be piped into a new session:
 ```bash
 # In session 1: /handoff continue the auth refactor
 # Then:
-my-pi < handoff-1234567890.md
+pnpx my-pi@latest < handoff-1234567890.md
 ```
 
 ## Project Structure
@@ -323,8 +518,11 @@ src/
     chain.ts          Agent chain pipelines
     filter-output.ts  Secret redaction in tool output
     handoff.ts        Session context export
+    lsp.ts            Language server tools and /lsp command
+    otel.ts           Local telemetry extension and /telemetry command
     prompt-presets.ts Runtime prompt preset selection and editing
     recall.ts         Past session recall guidance
+    telemetry-*.ts    Telemetry config + SQLite storage
   mcp/
     client.ts         Minimal MCP stdio client (JSON-RPC 2.0)
     config.ts         Loads and merges mcp.json configs
