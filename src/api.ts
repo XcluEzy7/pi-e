@@ -22,6 +22,7 @@ import {
 	load_builtin_extensions_config,
 	type BuiltinExtensionKey,
 } from './extensions/config.js';
+import confirm_destructive_extension from './extensions/confirm-destructive.js';
 import { create_extensions_extension } from './extensions/extensions.js';
 import filter_output_extension from './extensions/filter-output.js';
 import handoff_extension from './extensions/handoff.js';
@@ -48,6 +49,7 @@ export interface CreateMyPiOptions {
 	prompt_presets?: boolean;
 	lsp?: boolean;
 	session_name?: boolean;
+	confirm_destructive?: boolean;
 	telemetry?: boolean;
 	telemetry_db_path?: string;
 	model?: string;
@@ -68,6 +70,7 @@ const BUILTIN_EXTENSION_FACTORIES: Record<
 	'prompt-presets': prompt_presets_extension,
 	lsp: lsp_extension,
 	'session-name': session_name_extension,
+	'confirm-destructive': confirm_destructive_extension,
 };
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
@@ -90,6 +93,7 @@ function get_force_disabled_builtins(
 		| 'prompt_presets'
 		| 'lsp'
 		| 'session_name'
+		| 'confirm_destructive'
 	>,
 ): ReadonlySet<BuiltinExtensionKey> {
 	const force_disabled = new Set<BuiltinExtensionKey>();
@@ -102,6 +106,8 @@ function get_force_disabled_builtins(
 	if (!options.prompt_presets) force_disabled.add('prompt-presets');
 	if (!options.lsp) force_disabled.add('lsp');
 	if (!options.session_name) force_disabled.add('session-name');
+	if (!options.confirm_destructive)
+		force_disabled.add('confirm-destructive');
 	return force_disabled;
 }
 
@@ -160,6 +166,7 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 		prompt_presets = true,
 		lsp = true,
 		session_name = true,
+		confirm_destructive = true,
 		telemetry,
 		telemetry_db_path,
 		model,
@@ -183,6 +190,7 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 		prompt_presets,
 		lsp,
 		session_name,
+		confirm_destructive,
 	});
 	const managed_extension_factories: ExtensionFactory[] = [
 		create_telemetry_extension({

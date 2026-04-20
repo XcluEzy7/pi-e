@@ -163,6 +163,11 @@ const main = defineCommand({
 			description: 'Disable session name extension',
 			default: false,
 		},
+		'no-confirm-destructive': {
+			type: 'boolean',
+			description: 'Disable destructive action confirmations',
+			default: false,
+		},
 		telemetry: {
 			type: 'boolean',
 			description: 'Enable local SQLite telemetry for this process',
@@ -274,6 +279,8 @@ const main = defineCommand({
 				!args['no-builtin'] && !args['no-prompt-presets'],
 			lsp: !args['no-builtin'] && !args['no-lsp'],
 			session_name: !args['no-builtin'] && !args['no-session-name'],
+			confirm_destructive:
+				!args['no-builtin'] && !args['no-confirm-destructive'],
 			telemetry: telemetry_override,
 			telemetry_db_path: args['telemetry-db'],
 			model: args.model,

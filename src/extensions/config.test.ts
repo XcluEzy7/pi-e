@@ -29,6 +29,9 @@ describe('find_builtin_extension', () => {
 		expect(find_builtin_extension('auto-name')?.key).toBe(
 			'session-name',
 		);
+		expect(find_builtin_extension('confirm')?.key).toBe(
+			'confirm-destructive',
+		);
 	});
 });
 

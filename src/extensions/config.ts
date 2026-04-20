@@ -17,7 +17,8 @@ export type BuiltinExtensionKey =
 	| 'recall'
 	| 'prompt-presets'
 	| 'lsp'
-	| 'session-name';
+	| 'session-name'
+	| 'confirm-destructive';
 
 export interface BuiltinExtensionInfo {
 	key: BuiltinExtensionKey;
@@ -115,6 +116,14 @@ export const BUILTIN_EXTENSIONS: BuiltinExtensionInfo[] = [
 			'AI-powered session auto-naming and /session-name command',
 		cli_flag: '--no-session-name',
 		aliases: ['session-name', 'session', 'auto-name'],
+	},
+	{
+		key: 'confirm-destructive',
+		label: 'Confirm destructive',
+		description:
+			'Prompt before destructive session actions like clear, switch, and fork',
+		cli_flag: '--no-confirm-destructive',
+		aliases: ['confirm-destructive', 'confirm'],
 	},
 ];
 
