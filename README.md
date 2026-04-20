@@ -321,6 +321,8 @@ In interactive mode:
 - `/extensions` — open the built-in extensions manager
 - `/extensions list` — print built-in extensions with saved/effective
   state
+- `/extensions enable|disable|toggle` — without a key, open the
+  interactive toggle list
 - `/extensions enable <key>` / `/extensions disable <key>` — toggle a
   built-in extension
 - `/skills` — open the interactive skills manager (unified list with

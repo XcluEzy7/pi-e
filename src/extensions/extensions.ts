@@ -1,4 +1,7 @@
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+} from '@mariozechner/pi-coding-agent';
 import {
 	Container,
 	SettingsList,
@@ -136,6 +139,113 @@ export function create_extensions_extension(
 		options.force_disabled,
 	);
 
+	async function show_manager(
+		ctx: ExtensionCommandContext,
+	): Promise<boolean> {
+		if (!ctx.hasUI) return false;
+
+		const states = resolve_builtin_extension_states(force_disabled);
+		const initial_enabled = new Set(
+			states
+				.filter((state) => state.saved_enabled)
+				.map((state) => state.key),
+		);
+		const current_enabled = new Set(initial_enabled);
+
+		await ctx.ui.custom((tui, theme, _kb, done) => {
+			const items = states.map(to_setting_item);
+			const container = new Container();
+
+			container.addChild({
+				render: () => {
+					const saved_enabled = current_enabled.size;
+					const saved_disabled = states.length - saved_enabled;
+					const enabled_now = [...current_enabled].filter(
+						(key) => !force_disabled.has(key as BuiltinExtensionKey),
+					).length;
+					const disabled_now = states.length - enabled_now;
+					return [
+						theme.fg('accent', theme.bold('Built-in extensions')),
+						theme.fg(
+							'muted',
+							`${saved_enabled} saved enabled • ${saved_disabled} saved disabled • ${enabled_now} enabled now • ${disabled_now} disabled now`,
+						),
+						'',
+					];
+				},
+				invalidate: () => {},
+			});
+
+			const settings_list = new SettingsList(
+				items,
+				Math.min(Math.max(items.length + 4, 8), 16),
+				{
+					cursor: theme.fg('accent', '›'),
+					label: (text, selected) =>
+						selected ? theme.fg('accent', text) : text,
+					value: (text, selected) => {
+						const color = text === ENABLED ? 'success' : 'dim';
+						const rendered = theme.fg(color, text);
+						return selected
+							? theme.bold(theme.fg('accent', rendered))
+							: rendered;
+					},
+					description: (text) => theme.fg('muted', text),
+					hint: (text) => theme.fg('dim', text),
+				},
+				(id, new_value) => {
+					const key = id as BuiltinExtensionKey;
+					const enabled = new_value === ENABLED;
+					if (enabled) {
+						current_enabled.add(key);
+					} else {
+						current_enabled.delete(key);
+					}
+					save_extension_enabled(key, enabled);
+				},
+				() => done(undefined),
+				{ enableSearch: true },
+			);
+
+			container.addChild(settings_list);
+			container.addChild(
+				new Text(
+					theme.fg(
+						'dim',
+						'esc close • search filters • changes save immediately • CLI --no-* flags still win in this process',
+					),
+					0,
+					1,
+				),
+			);
+
+			return {
+				render(width: number) {
+					return container.render(width);
+				},
+				invalidate() {
+					container.invalidate();
+				},
+				handleInput(data: string) {
+					settings_list.handleInput(data);
+					tui.requestRender();
+				},
+			};
+		});
+
+		if (!sets_equal(initial_enabled, current_enabled)) {
+			ctx.ui.notify(
+				force_disabled.size > 0
+					? 'Reloading to apply updated built-in extensions. CLI --no-* flags still force-disable some extensions in this process.'
+					: 'Reloading to apply updated built-in extensions...',
+				'info',
+			);
+			await ctx.reload();
+		}
+
+		return true;
+	}
+
 	return async function extensions(pi: ExtensionAPI) {
 		const subs = ['list', 'enable', 'disable', 'toggle', 'search'];
 
@@ -169,113 +279,8 @@ export function create_extensions_extension(
 			handler: async (args, ctx) => {
 				const trimmed = args.trim();
 
-				if (!trimmed && ctx.hasUI) {
-					const states =
-						resolve_builtin_extension_states(force_disabled);
-					const initial_enabled = new Set(
-						states
-							.filter((state) => state.saved_enabled)
-							.map((state) => state.key),
-					);
-					const current_enabled = new Set(initial_enabled);
-
-					await ctx.ui.custom((tui, theme, _kb, done) => {
-						const items = states.map(to_setting_item);
-						const container = new Container();
-
-						container.addChild({
-							render: () => {
-								const saved_enabled = current_enabled.size;
-								const saved_disabled = states.length - saved_enabled;
-								const enabled_now = [...current_enabled].filter(
-									(key) =>
-										!force_disabled.has(key as BuiltinExtensionKey),
-								).length;
-								const disabled_now = states.length - enabled_now;
-								return [
-									theme.fg(
-										'accent',
-										theme.bold('Built-in extensions'),
-									),
-									theme.fg(
-										'muted',
-										`${saved_enabled} saved enabled • ${saved_disabled} saved disabled • ${enabled_now} enabled now • ${disabled_now} disabled now`,
-									),
-									'',
-								];
-							},
-							invalidate: () => {},
-						});
-
-						const settings_list = new SettingsList(
-							items,
-							Math.min(Math.max(items.length + 4, 8), 16),
-							{
-								cursor: theme.fg('accent', '›'),
-								label: (text, selected) =>
-									selected ? theme.fg('accent', text) : text,
-								value: (text, selected) => {
-									const color = text === ENABLED ? 'success' : 'dim';
-									const rendered = theme.fg(color, text);
-									return selected
-										? theme.bold(theme.fg('accent', rendered))
-										: rendered;
-								},
-								description: (text) => theme.fg('muted', text),
-								hint: (text) => theme.fg('dim', text),
-							},
-							(id, new_value) => {
-								const key = id as BuiltinExtensionKey;
-								const enabled = new_value === ENABLED;
-								if (enabled) {
-									current_enabled.add(key);
-								} else {
-									current_enabled.delete(key);
-								}
-								save_extension_enabled(key, enabled);
-							},
-							() => done(undefined),
-							{ enableSearch: true },
-						);
-
-						container.addChild(settings_list);
-						container.addChild(
-							new Text(
-								theme.fg(
-									'dim',
-									'esc close • search filters • changes save immediately • CLI --no-* flags still win in this process',
-								),
-								0,
-								1,
-							),
-						);
-
-						return {
-							render(width: number) {
-								return container.render(width);
-							},
-							invalidate() {
-								container.invalidate();
-							},
-							handleInput(data: string) {
-								settings_list.handleInput(data);
-								tui.requestRender();
-							},
-						};
-					});
-
-					if (!sets_equal(initial_enabled, current_enabled)) {
-						ctx.ui.notify(
-							force_disabled.size > 0
-								? 'Reloading to apply updated built-in extensions. CLI --no-* flags still force-disable some extensions in this process.'
-								: 'Reloading to apply updated built-in extensions...',
-							'info',
-						);
-						await ctx.reload();
-						return;
-					}
-
-					return;
+				if (!trimmed) {
+					if (await show_manager(ctx)) return;
 				}
 
 				const [sub, ...rest] = (trimmed || 'list').split(/\s+/);
@@ -296,6 +301,7 @@ export function create_extensions_extension(
 					case 'disable':
 					case 'toggle': {
 						if (!arg) {
+							if (await show_manager(ctx)) return;
 							ctx.ui.notify(
 								`Usage: /extensions ${sub} <key>`,
 								'warning',
