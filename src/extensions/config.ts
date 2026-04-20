@@ -79,7 +79,8 @@ export const BUILTIN_EXTENSIONS: BuiltinExtensionInfo[] = [
 	{
 		key: 'handoff',
 		label: 'Handoff',
-		description: 'Session handoff export and /handoff command',
+		description:
+			'AI-generated session handoff with editor review and new-session prefill',
 		cli_flag: '--no-handoff',
 		aliases: ['handoff'],
 	},
