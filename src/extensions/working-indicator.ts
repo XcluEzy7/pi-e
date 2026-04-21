@@ -9,25 +9,7 @@ import {
 	type WorkingIndicatorMode,
 } from './working-indicator-config.js';
 
-const COMMAND_MODES = [
-	'dot',
-	'none',
-	'pulse',
-	'spinner',
-	'reset',
-] as const;
-const SPINNER_FRAMES = [
-	'⠋',
-	'⠙',
-	'⠹',
-	'⠸',
-	'⠼',
-	'⠴',
-	'⠦',
-	'⠧',
-	'⠇',
-	'⠏',
-];
+const COMMAND_MODES = ['dot', 'none', 'reset'] as const;
 
 export function get_working_indicator(
 	ctx: Pick<ExtensionContext, 'ui'>,
@@ -40,26 +22,6 @@ export function get_working_indicator(
 			};
 		case 'none':
 			return { frames: [] };
-		case 'pulse':
-			return {
-				frames: [
-					ctx.ui.theme.fg('dim', '·'),
-					ctx.ui.theme.fg('muted', '•'),
-					ctx.ui.theme.fg('accent', '●'),
-					ctx.ui.theme.fg('muted', '•'),
-				],
-				intervalMs: 120,
-			};
-		case 'spinner':
-			return {
-				frames: SPINNER_FRAMES.map((frame, index) =>
-					ctx.ui.theme.fg(
-						index % 2 === 0 ? 'accent' : 'muted',
-						frame,
-					),
-				),
-				intervalMs: 80,
-			};
 		case 'default':
 			return undefined;
 	}
@@ -73,10 +35,6 @@ export function describe_working_indicator_mode(
 			return 'static dot';
 		case 'none':
 			return 'hidden';
-		case 'pulse':
-			return 'pulse';
-		case 'spinner':
-			return 'custom spinner';
 		case 'default':
 			return 'pi default spinner';
 	}
@@ -90,12 +48,7 @@ export function parse_working_indicator_mode(
 	if (normalized === 'reset' || normalized === 'default') {
 		return 'default';
 	}
-	if (
-		normalized === 'dot' ||
-		normalized === 'none' ||
-		normalized === 'pulse' ||
-		normalized === 'spinner'
-	) {
+	if (normalized === 'dot' || normalized === 'none') {
 		return normalized;
 	}
 	return null;
@@ -119,7 +72,7 @@ export default async function working_indicator(pi: ExtensionAPI) {
 
 	pi.registerCommand('working-indicator', {
 		description:
-			'Set the streaming working indicator: dot, pulse, none, spinner, or reset',
+			'Set the streaming working indicator: dot, none, or reset',
 		getArgumentCompletions: (prefix) => {
 			const value = prefix.trim().toLowerCase();
 			return COMMAND_MODES.filter((entry) =>
@@ -137,7 +90,7 @@ export default async function working_indicator(pi: ExtensionAPI) {
 					return;
 				}
 				ctx.ui.notify(
-					'Usage: /working-indicator [dot|pulse|none|spinner|reset]',
+					'Usage: /working-indicator [dot|none|reset]',
 					'error',
 				);
 				return;

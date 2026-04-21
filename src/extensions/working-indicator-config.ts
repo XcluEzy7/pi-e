@@ -8,12 +8,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-export type WorkingIndicatorMode =
-	| 'default'
-	| 'dot'
-	| 'none'
-	| 'pulse'
-	| 'spinner';
+export type WorkingIndicatorMode = 'default' | 'dot' | 'none';
 
 export interface WorkingIndicatorConfig {
 	version: number;
@@ -71,11 +66,5 @@ export function save_working_indicator_config(
 export function is_working_indicator_mode(
 	value: unknown,
 ): value is WorkingIndicatorMode {
-	return (
-		value === 'default' ||
-		value === 'dot' ||
-		value === 'none' ||
-		value === 'pulse' ||
-		value === 'spinner'
-	);
+	return value === 'default' || value === 'dot' || value === 'none';
 }
