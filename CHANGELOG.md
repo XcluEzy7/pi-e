@@ -1,5 +1,14 @@
 # my-pi
 
+## 0.1.3
+
+### Patch Changes
+
+- 378799b: Simplify working indicator options to useful modes only,
+  removing distracting experimental custom indicator variants.
+- 78f8067: Restore Pi’s default working spinner by default while
+  keeping customizable indicator modes and footer alignment.
+
 ## 0.1.2
 
 ### Patch Changes
