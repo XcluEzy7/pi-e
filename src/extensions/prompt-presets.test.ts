@@ -13,6 +13,7 @@ import {
 	merge_prompt_presets,
 	normalize_prompt_presets,
 	remove_project_prompt_preset,
+	render_footer_status_line,
 	save_persisted_prompt_state,
 	save_project_prompt_presets,
 } from './prompt-presets.js';
@@ -71,6 +72,53 @@ describe('merge_prompt_presets', () => {
 			instructions: 'Custom preset.',
 		});
 		expect(merged.standard).toEqual(DEFAULT_PROMPT_PRESETS.standard);
+	});
+});
+
+function strip_ansi(value: string): string {
+	return value.replace(/\u001b\[[0-9;]*m/g, '');
+}
+
+describe('render_footer_status_line', () => {
+	const theme = {
+		fg: (_token: string, text: string) => text,
+	} as any;
+
+	it('places extension status left and prompt status right on one line', () => {
+		expect(
+			strip_ansi(
+				render_footer_status_line(
+					theme,
+					60,
+					['MCP 5/5 connected'],
+					'prompt:terse',
+				) ?? '',
+			),
+		).toBe(
+			'MCP 5/5 connected                               prompt:terse',
+		);
+	});
+
+	it('keeps right-aligned prompt status when no extension statuses exist', () => {
+		expect(
+			strip_ansi(
+				render_footer_status_line(theme, 20, [], 'prompt:terse') ??
+					'',
+			),
+		).toBe('        prompt:terse');
+	});
+
+	it('truncates left status to preserve the prompt status', () => {
+		expect(
+			strip_ansi(
+				render_footer_status_line(
+					theme,
+					28,
+					['MCP 5/5 connected', 'Indicator: custom spinner'],
+					'prompt:terse',
+				) ?? '',
+			),
+		).toBe('MCP 5/5 conn... prompt:terse');
 	});
 });
 

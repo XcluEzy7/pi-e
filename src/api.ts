@@ -34,6 +34,7 @@ import recall_extension from './extensions/recall.js';
 import session_name_extension from './extensions/session-name.js';
 import skills_extension from './extensions/skills.js';
 import { create_telemetry_extension } from './extensions/telemetry.js';
+import working_indicator_extension from './extensions/working-indicator.js';
 import { create_skills_manager } from './skills/manager.js';
 
 export interface CreateMyPiOptions {
@@ -52,6 +53,7 @@ export interface CreateMyPiOptions {
 	session_name?: boolean;
 	confirm_destructive?: boolean;
 	hooks_resolution?: boolean;
+	working_indicator?: boolean;
 	telemetry?: boolean;
 	telemetry_db_path?: string;
 	model?: string;
@@ -74,6 +76,7 @@ const BUILTIN_EXTENSION_FACTORIES: Record<
 	'session-name': session_name_extension,
 	'confirm-destructive': confirm_destructive_extension,
 	'hooks-resolution': hooks_resolution_extension,
+	'working-indicator': working_indicator_extension,
 };
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
@@ -98,6 +101,7 @@ function get_force_disabled_builtins(
 		| 'session_name'
 		| 'confirm_destructive'
 		| 'hooks_resolution'
+		| 'working_indicator'
 	>,
 ): ReadonlySet<BuiltinExtensionKey> {
 	const force_disabled = new Set<BuiltinExtensionKey>();
@@ -114,6 +118,8 @@ function get_force_disabled_builtins(
 		force_disabled.add('confirm-destructive');
 	if (!options.hooks_resolution)
 		force_disabled.add('hooks-resolution');
+	if (!options.working_indicator)
+		force_disabled.add('working-indicator');
 	return force_disabled;
 }
 
@@ -174,6 +180,7 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 		session_name = true,
 		confirm_destructive = true,
 		hooks_resolution = true,
+		working_indicator = true,
 		telemetry,
 		telemetry_db_path,
 		model,
@@ -199,6 +206,7 @@ export async function create_my_pi(options: CreateMyPiOptions = {}) {
 		session_name,
 		confirm_destructive,
 		hooks_resolution,
+		working_indicator,
 	});
 	const managed_extension_factories: ExtensionFactory[] = [
 		create_telemetry_extension({

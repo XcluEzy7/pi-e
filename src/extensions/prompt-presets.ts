@@ -522,6 +522,51 @@ function format_token_count(count: number): string {
 	return `${Math.round(count / 1000000)}M`;
 }
 
+export function render_footer_status_line(
+	theme: ExtensionContext['ui']['theme'],
+	width: number,
+	left_items: string[],
+	right_item?: string,
+): string | undefined {
+	const left = sanitize_status_text(left_items.join(' '));
+	const right = right_item ? sanitize_status_text(right_item) : '';
+	if (!left && !right) return undefined;
+	if (!right) {
+		return truncateToWidth(
+			theme.fg('dim', left),
+			width,
+			theme.fg('dim', '...'),
+		);
+	}
+	if (!left) {
+		const themed_right = theme.fg('dim', right);
+		const right_width = visibleWidth(themed_right);
+		return right_width >= width
+			? truncateToWidth(themed_right, width, theme.fg('dim', '...'))
+			: `${' '.repeat(width - right_width)}${themed_right}`;
+	}
+
+	const right_width = visibleWidth(right);
+	if (right_width >= width) {
+		return truncateToWidth(
+			theme.fg('dim', right),
+			width,
+			theme.fg('dim', '...'),
+		);
+	}
+
+	const min_gap = 1;
+	const available_left = Math.max(0, width - right_width - min_gap);
+	const truncated_left = truncateToWidth(left, available_left, '...');
+	const left_width = visibleWidth(truncated_left);
+	const gap = Math.max(min_gap, width - left_width - right_width);
+	return (
+		theme.fg('dim', truncated_left) +
+		' '.repeat(gap) +
+		theme.fg('dim', right)
+	);
+}
+
 function get_current_thinking_level(ctx: ExtensionContext): string {
 	const entries = ctx.sessionManager.getEntries();
 	for (let i = entries.length - 1; i >= 0; i--) {
@@ -691,19 +736,6 @@ function render_footer_lines(
 		active_base_name,
 		active_layers,
 	);
-	if (prompt_status) {
-		const themed_status = theme.fg('dim', prompt_status);
-		const status_width = visibleWidth(themed_status);
-		const aligned_status =
-			status_width >= width
-				? truncateToWidth(
-						themed_status,
-						width,
-						theme.fg('dim', '...'),
-					)
-				: `${' '.repeat(width - status_width)}${themed_status}`;
-		lines.push(aligned_status);
-	}
 
 	const other_statuses = Array.from(
 		footer_data.getExtensionStatuses().entries(),
@@ -711,14 +743,14 @@ function render_footer_lines(
 		.filter(([key]) => key !== 'preset')
 		.sort(([a], [b]) => a.localeCompare(b))
 		.map(([, text]) => sanitize_status_text(text));
-	if (other_statuses.length > 0) {
-		lines.push(
-			truncateToWidth(
-				other_statuses.join(' '),
-				width,
-				theme.fg('dim', '...'),
-			),
-		);
+	const combined_status_line = render_footer_status_line(
+		theme,
+		width,
+		other_statuses,
+		prompt_status,
+	);
+	if (combined_status_line) {
+		lines.push(combined_status_line);
 	}
 
 	return lines;

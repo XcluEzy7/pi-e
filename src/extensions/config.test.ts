@@ -35,6 +35,9 @@ describe('find_builtin_extension', () => {
 		expect(find_builtin_extension('hooks')?.key).toBe(
 			'hooks-resolution',
 		);
+		expect(find_builtin_extension('spinner')?.key).toBe(
+			'working-indicator',
+		);
 	});
 });
 

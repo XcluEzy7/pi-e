@@ -173,6 +173,11 @@ const main = defineCommand({
 			description: 'Disable Claude-style hook execution',
 			default: false,
 		},
+		'no-working-indicator': {
+			type: 'boolean',
+			description: 'Disable working indicator customization command',
+			default: false,
+		},
 		telemetry: {
 			type: 'boolean',
 			description: 'Enable local SQLite telemetry for this process',
@@ -287,6 +292,8 @@ const main = defineCommand({
 			confirm_destructive:
 				!args['no-builtin'] && !args['no-confirm-destructive'],
 			hooks_resolution: !args['no-builtin'] && !args['no-hooks'],
+			working_indicator:
+				!args['no-builtin'] && !args['no-working-indicator'],
 			telemetry: telemetry_override,
 			telemetry_db_path: args['telemetry-db'],
 			model: args.model,

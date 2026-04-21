@@ -19,7 +19,8 @@ export type BuiltinExtensionKey =
 	| 'lsp'
 	| 'session-name'
 	| 'confirm-destructive'
-	| 'hooks-resolution';
+	| 'hooks-resolution'
+	| 'working-indicator';
 
 export interface BuiltinExtensionInfo {
 	key: BuiltinExtensionKey;
@@ -133,6 +134,14 @@ export const BUILTIN_EXTENSIONS: BuiltinExtensionInfo[] = [
 			'Claude Code style PostToolUse hook compatibility from .claude, .rulesync, and .pi configs',
 		cli_flag: '--no-hooks',
 		aliases: ['hooks-resolution', 'hooks'],
+	},
+	{
+		key: 'working-indicator',
+		label: 'Working indicator',
+		description:
+			'Customizable streaming working indicator with /working-indicator command',
+		cli_flag: '--no-working-indicator',
+		aliases: ['working-indicator', 'indicator', 'spinner'],
 	},
 ];
 
