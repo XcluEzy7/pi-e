@@ -1,5 +1,14 @@
 # my-pi
 
+## 0.1.4
+
+### Patch Changes
+
+- b070e55: Clarify non-interactive behavior, nested runs, safer
+  defaults, simpler CLI logic, and richer built-in help.
+- a89180c: Improve non-interactive defaults, disable UI-only builtins
+  headlessly, simplify CLI conditionals, and enrich help output.
+
 ## 0.1.3
 
 ### Patch Changes
