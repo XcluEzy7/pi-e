@@ -70,6 +70,13 @@ NOTES
     and working-indicator customization are skipped.
   - Repeat -e / --extension to stack multiple extensions.
 
+NESTED RUNS
+
+  - Child runs inherit cwd and environment unless you isolate them explicitly.
+  - Use --agent-dir to isolate auth, config, sessions, and telemetry state.
+  - For safer evals, consider --no-mcp and --no-hooks plus an explicit
+    --system-prompt.
+
 EXAMPLES
 
   my-pi
