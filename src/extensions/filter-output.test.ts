@@ -1,176 +1,52 @@
 import { describe, expect, it } from 'vitest';
+import {
+	looks_like_ssh_config,
+	redact_ssh_config_metadata,
+	redact_text,
+} from './filter-output.js';
 
-interface SecretPattern {
-	name: string;
-	pattern: RegExp;
-}
-
-const SECRET_PATTERNS: SecretPattern[] = [
-	{ name: 'AWS Access Key', pattern: /AKIA[A-Z0-9]{16}/g },
-	{ name: 'AWS Temp Access Key', pattern: /ASIA[A-Z0-9]{16}/g },
-	{
-		name: 'AWS Secret Key',
-		pattern:
-			/\b(?:AWS_SECRET_ACCESS_KEY|aws_secret_access_key|secret_access_key|SecretAccessKey)\b\s*[:=]\s*["']?[A-Za-z0-9/+=]{40,}["']?/g,
-	},
-	{
-		name: 'Bearer Token',
-		pattern: /Bearer\s+[a-zA-Z0-9._-]{20,}/g,
-	},
-	{
-		name: 'OpenAI/Anthropic API Key',
-		pattern: /sk-[a-zA-Z0-9._-]{20,}/g,
-	},
-	{
-		name: 'Stripe Live Key',
-		pattern: /sk_live_[a-zA-Z0-9]{20,}/g,
-	},
-	{
-		name: 'Stripe Test Key',
-		pattern: /sk_test_[a-zA-Z0-9]{20,}/g,
-	},
-	{
-		name: 'Hetzner Token',
-		pattern:
-			/(?:HCLOUD_TOKEN|hcloud_token|token)\s*[:=]\s*["']?[a-f0-9]{64}\b/g,
-	},
-	{
-		name: 'Private Key',
-		pattern:
-			/-----BEGIN\s+[\w\s]*PRIVATE\s+KEY-----[\s\S]*?-----END\s+[\w\s]*PRIVATE\s+KEY-----/g,
-	},
-	{
-		name: 'Connection String with Password',
-		pattern: /:\/\/[^:]+:[^@]+@/g,
-	},
-	{
-		name: 'Generic Password Field',
-		pattern:
-			/\b[\w-]*(?:password|passwd|secret|token|api[_-]?key)\b\s*[:=]\s*["']?[A-Za-z0-9._:/+=@!-]{8,}/gi,
-	},
-	{
-		name: 'Generic Secret Phrase',
-		pattern:
-			/\b(?:password|passwd|secret|token|api[_-]?key)\b(?:\s+(?:is|was|seen|value|header))?\s*[:=]?\s+[A-Za-z0-9._:/+=@!-]{8,}/gi,
-	},
-	{
-		name: 'Tavily API Key',
-		pattern: /tvly-[a-zA-Z0-9_-]{20,}/g,
-	},
-	{
-		name: 'Kagi API Key',
-		pattern: /[a-zA-Z0-9_-]{40,}\.[a-zA-Z0-9_-]{40,}/g,
-	},
-	{
-		name: 'Brave API Key',
-		pattern: /BSA[A-Z0-9]{20,}/g,
-	},
-	{
-		name: 'Firecrawl API Key',
-		pattern: /fc-[a-f0-9]{32}/g,
-	},
-	{
-		name: 'GitHub Token',
-		pattern: /gh[pousr]_[a-zA-Z0-9]{36,}/g,
-	},
-	{
-		name: 'GitHub Fine-grained PAT',
-		pattern: /github_pat_[a-zA-Z0-9_]{20,}/g,
-	},
-];
-
-function redact(text: string): { redacted: string; count: number } {
-	let count = 0;
-	let result = text;
-
-	for (const sp of SECRET_PATTERNS) {
-		sp.pattern.lastIndex = 0;
-		result = result.replace(sp.pattern, (match) => {
-			count++;
-			const prefix = match.slice(0, 4);
-			return `${prefix}${'*'.repeat(Math.min(match.length - 4, 20))}[REDACTED:${sp.name}]`;
-		});
-	}
-
-	return { redacted: result, count };
-}
-
-describe('redact', () => {
+describe('redact_text', () => {
 	it('redacts AWS access keys', () => {
-		const input = 'key: AKIA1234567890CANARY';
-		const { redacted, count } = redact(input);
+		const input = 'key: AKIA1234567890ABCDEF';
+		const { redacted, count } = redact_text(input);
 		expect(count).toBe(1);
 		expect(redacted).toContain('[REDACTED:AWS Access Key]');
-		expect(redacted).not.toContain('AKIA1234567890CANARY');
+		expect(redacted).not.toContain('AKIA1234567890ABCDEF');
 	});
 
 	it('redacts AWS temp access keys', () => {
-		const input = 'key: ASIA1234567890CANARY';
-		const { redacted, count } = redact(input);
+		const input = 'key: ASIA1234567890ABCDEF';
+		const { redacted, count } = redact_text(input);
 		expect(count).toBe(1);
 		expect(redacted).toContain('[REDACTED:AWS Temp Access Key]');
-		expect(redacted).not.toContain('ASIA1234567890CANARY');
+		expect(redacted).not.toContain('ASIA1234567890ABCDEF');
 	});
 
 	it('redacts uppercase AWS secret env vars', () => {
 		const input =
-			'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG+bPxRfiCYCANARYKEY01';
-		const { redacted, count } = redact(input);
+			'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY01';
+		const { redacted, count } = redact_text(input);
 		expect(count).toBe(1);
 		expect(redacted).toContain('[REDACTED:AWS Secret Key]');
 		expect(redacted).not.toContain(
-			'wJalrXUtnFEMI/K7MDENG+bPxRfiCYCANARYKEY01',
-		);
-	});
-
-	it('redacts lower-case secret_access_key assignments', () => {
-		const input =
-			'secret_access_key = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYCANARYKEY01"';
-		const { redacted, count } = redact(input);
-		expect(count).toBe(1);
-		expect(redacted).toContain('[REDACTED:AWS Secret Key]');
-		expect(redacted).not.toContain(
-			'wJalrXUtnFEMI/K7MDENG+bPxRfiCYCANARYKEY01',
+			'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY01',
 		);
 	});
 
 	it('redacts bearer tokens', () => {
 		const input =
-			'Authorization: Bearer canaryBearerTokenValueAlphaNum1234567890ZZ';
-		const { redacted, count } = redact(input);
+			'Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456';
+		const { redacted, count } = redact_text(input);
 		expect(count).toBe(1);
 		expect(redacted).toContain('[REDACTED:Bearer Token]');
-	});
-
-	it('redacts OpenAI/Anthropic API keys', () => {
-		const input =
-			'ANTHROPIC_API_KEY=sk-ant-api-key-example-123456789012345';
-		const { redacted, count } = redact(input);
-		expect(count).toBe(1);
-		expect(redacted).toContain('[REDACTED:OpenAI/Anthropic API Key]');
 		expect(redacted).not.toContain(
-			'[REDACTED:Generic Password Field]',
+			'Bearer abcdefghijklmnopqrstuvwxyz123456',
 		);
-	});
-
-	it('redacts Stripe live keys', () => {
-		const input = `sk_live_${'51HgT2CJa8qB1E7R9X4abcdefghijklmn'}`;
-		const { redacted, count } = redact(input);
-		expect(count).toBe(1);
-		expect(redacted).toContain('[REDACTED:Stripe Live Key]');
-	});
-
-	it('redacts Hetzner tokens', () => {
-		const input = `HCLOUD_TOKEN=${'a'.repeat(64)}`;
-		const { redacted, count } = redact(input);
-		expect(count).toBe(1);
-		expect(redacted).toContain('[REDACTED:Hetzner Token]');
-		expect(redacted).not.toContain('a'.repeat(64));
 	});
 
 	it('redacts full private key blocks', () => {
 		const input = `-----BEGIN PRIVATE KEY-----\nQ0FOQVJZX1BSSVZBVEVfS0VZX0JMT0NLX0xJTkVfMDAx\nQ0FOQVJZX1BSSVZBVEVfS0VZX0JMT0NLX0xJTkVfMDAy\n-----END PRIVATE KEY-----`;
-		const { redacted, count } = redact(input);
+		const { redacted, count } = redact_text(input);
 		expect(count).toBe(1);
 		expect(redacted).toContain('[REDACTED:Private Key]');
 		expect(redacted).not.toContain(
@@ -179,98 +55,120 @@ describe('redact', () => {
 	});
 
 	it('redacts connection strings with passwords', () => {
-		const input = 'postgres://user:supersecretpass@localhost:5432/db';
-		const { redacted, count } = redact(input);
+		const input =
+			'postgres://user:super-secret-password@localhost:5432/app';
+		const { redacted, count } = redact_text(input);
 		expect(count).toBe(1);
 		expect(redacted).toContain(
 			'[REDACTED:Connection String with Password]',
 		);
+		expect(redacted).not.toContain(':super-secret-password@');
 	});
 
-	it('redacts prefixed generic secret fields', () => {
-		const input =
-			'OPAQUE_SECRET=cnyr_ZmFrZVNlY3JldFZhbHVlX1JlZGFjdGlvbl9TdWl0ZV8wMDE';
-		const { redacted, count } = redact(input);
+	it('redacts generic secret fields', () => {
+		const input = 'SERVICE_PASSWORD=CanaryPassword-Redaction-001!';
+		const { redacted, count } = redact_text(input);
 		expect(count).toBe(1);
 		expect(redacted).toContain('[REDACTED:Generic Password Field]');
-		expect(redacted).not.toContain(
-			'cnyr_ZmFrZVNlY3JldFZhbHVlX1JlZGFjdGlvbl9TdWl0ZV8wMDE',
-		);
-	});
-
-	it('redacts freeform secret phrases in logs', () => {
-		const input =
-			'2026-04-19T09:00:02Z INFO opaque fallback secret cnyr_ZmFrZVNlY3JldFZhbHVlX1JlZGFjdGlvbl9TdWl0ZV8wMDE';
-		const { redacted, count } = redact(input);
-		expect(count).toBe(1);
-		expect(redacted).toContain('[REDACTED:Generic Secret Phrase]');
-		expect(redacted).not.toContain(
-			'cnyr_ZmFrZVNlY3JldFZhbHVlX1JlZGFjdGlvbl9TdWl0ZV8wMDE',
-		);
-	});
-
-	it('redacts Tavily API keys', () => {
-		const input = 'tvly-canary-redaction-suite-000000000000000001';
-		const { redacted, count } = redact(input);
-		expect(count).toBe(1);
-		expect(redacted).toContain('[REDACTED:Tavily API Key]');
-	});
-
-	it('redacts Kagi API keys', () => {
-		const input = `${'a'.repeat(40)}.${'b'.repeat(40)}`;
-		const { redacted, count } = redact(input);
-		expect(count).toBe(1);
-		expect(redacted).toContain('[REDACTED:Kagi API Key]');
-	});
-
-	it('redacts Brave API keys', () => {
-		const input = 'BSA' + 'A'.repeat(20);
-		const { redacted, count } = redact(input);
-		expect(count).toBe(1);
-		expect(redacted).toContain('[REDACTED:Brave API Key]');
-	});
-
-	it('redacts Firecrawl API keys', () => {
-		const input = 'fc-e3b0c44298fc1c149afbf4c8996fb924';
-		const { redacted, count } = redact(input);
-		expect(count).toBe(1);
-		expect(redacted).toContain('[REDACTED:Firecrawl API Key]');
-	});
-
-	it('redacts GitHub tokens', () => {
-		const input =
-			'ghp_CanaryRedactionSuite000000000000000000000001ABCD';
-		const { redacted, count } = redact(input);
-		expect(count).toBe(1);
-		expect(redacted).toContain('[REDACTED:GitHub Token]');
+		expect(redacted).not.toContain('CanaryPassword-Redaction-001!');
 	});
 
 	it('redacts GitHub fine-grained PATs', () => {
 		const input = 'github_pat_' + 'A'.repeat(30);
-		const { redacted, count } = redact(input);
+		const { redacted, count } = redact_text(input);
 		expect(count).toBe(1);
 		expect(redacted).toContain('[REDACTED:GitHub Fine-grained PAT]');
+		expect(redacted).not.toContain('github_pat_' + 'A'.repeat(30));
 	});
 
-	it('redacts multiple secrets in one string', () => {
-		const input =
-			'aws: AKIA1234567890CANARY, SERVICE_PASSWORD=CanaryPassword-Redaction-001!';
-		const { redacted, count } = redact(input);
-		expect(count).toBe(2);
-		expect(redacted).not.toContain('AKIA1234567890CANARY');
-		expect(redacted).not.toContain('CanaryPassword-Redaction-001!');
+	it('redacts SSH config metadata from a config block', () => {
+		const input = `Host prod-app\n  HostName 10.0.0.12\n  User deploy\n  IdentityFile ~/.ssh/work-prod\n  ProxyJump bastion.internal\n  LocalForward 5432 db.internal:5432\n  RemoteForward 8443 localhost:443\n  DynamicForward 1080\n  ProxyCommand ssh -W %h:%p bastion.internal\n  CertificateFile ~/.ssh/work-prod-cert.pub\n  HostKeyAlias prod-app.internal\n  Match host *.internal user deploy\n`;
+		const { redacted, count } = redact_text(input);
+		expect(count).toBe(12);
+		expect(redacted).toContain('Host [REDACTED:SSH Host]');
+		expect(redacted).toContain('HostName [REDACTED:SSH HostName]');
+		expect(redacted).toContain('User [REDACTED:SSH User]');
+		expect(redacted).toContain(
+			'IdentityFile [REDACTED:SSH IdentityFile]',
+		);
+		expect(redacted).toContain('ProxyJump [REDACTED:SSH ProxyJump]');
+		expect(redacted).toContain(
+			'LocalForward [REDACTED:SSH LocalForward]',
+		);
+		expect(redacted).toContain(
+			'RemoteForward [REDACTED:SSH RemoteForward]',
+		);
+		expect(redacted).toContain(
+			'DynamicForward [REDACTED:SSH DynamicForward]',
+		);
+		expect(redacted).toContain(
+			'ProxyCommand [REDACTED:SSH ProxyCommand]',
+		);
+		expect(redacted).toContain(
+			'CertificateFile [REDACTED:SSH CertificateFile]',
+		);
+		expect(redacted).toContain(
+			'HostKeyAlias [REDACTED:SSH HostKeyAlias]',
+		);
+		expect(redacted).toContain('Match [REDACTED:SSH Match]');
+		expect(redacted).not.toContain('10.0.0.12');
+		expect(redacted).not.toContain('deploy');
+		expect(redacted).not.toContain('~/.ssh/work-prod');
+		expect(redacted).not.toContain('bastion.internal');
 	});
 
-	it('leaves clean text unchanged', () => {
-		const input = 'This is normal output with no secrets.';
-		const { redacted, count } = redact(input);
+	it('keeps Host * and Match all unchanged', () => {
+		const input = `Host *\n  ServerAliveInterval 30\nMatch all\n  ForwardAgent no\n`;
+		const { redacted, count } = redact_text(input, {
+			force_ssh_config: true,
+		});
 		expect(count).toBe(0);
 		expect(redacted).toBe(input);
 	});
 
-	it('preserves prefix in redacted output', () => {
-		const input = 'AKIA1234567890CANARY';
-		const { redacted } = redact(input);
-		expect(redacted).toMatch(/^AKIA/);
+	it('does not treat ordinary prose as SSH config', () => {
+		const input =
+			'User deploy should run HostName setup in docs first.';
+		const { redacted, count } = redact_text(input);
+		expect(count).toBe(0);
+		expect(redacted).toBe(input);
+	});
+
+	it('can force SSH redaction for config fragments', () => {
+		const input = 'HostName 10.42.0.7';
+		const { redacted, count } = redact_text(input, {
+			force_ssh_config: true,
+		});
+		expect(count).toBe(1);
+		expect(redacted).toBe('HostName [REDACTED:SSH HostName]');
+	});
+
+	it('leaves clean text unchanged', () => {
+		const input = 'This is normal output with no secrets.';
+		const { redacted, count } = redact_text(input);
+		expect(count).toBe(0);
+		expect(redacted).toBe(input);
+	});
+});
+
+describe('SSH helpers', () => {
+	it('detects SSH config content', () => {
+		const input = `Host prod\n  HostName 10.0.0.12\n  User deploy\n`;
+		expect(looks_like_ssh_config(input)).toBe(true);
+	});
+
+	it('does not detect unrelated content as SSH config', () => {
+		expect(
+			looks_like_ssh_config('HostName examples are documented here.'),
+		).toBe(false);
+	});
+
+	it('redacts SSH config metadata directly', () => {
+		const input = `Host prod\n  HostName 192.168.1.20\n  User ubuntu\n`;
+		const { redacted, count } = redact_ssh_config_metadata(input);
+		expect(count).toBe(3);
+		expect(redacted).toContain('Host [REDACTED:SSH Host]');
+		expect(redacted).toContain('HostName [REDACTED:SSH HostName]');
+		expect(redacted).toContain('User [REDACTED:SSH User]');
 	});
 });

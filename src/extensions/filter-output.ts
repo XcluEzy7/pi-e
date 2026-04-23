@@ -1,11 +1,17 @@
 // Filter-output extension — redact secrets from tool output
 // Patterns from https://github.com/spences10/nopeek
 
+import type { ImageContent, TextContent } from '@mariozechner/pi-ai';
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 
 interface SecretPattern {
 	name: string;
 	pattern: RegExp;
+}
+
+interface RedactionResult {
+	redacted: string;
+	count: number;
 }
 
 const SECRET_PATTERNS: SecretPattern[] = [
@@ -82,7 +88,80 @@ const SECRET_PATTERNS: SecretPattern[] = [
 	},
 ];
 
-function redact(text: string): { redacted: string; count: number } {
+const SSH_CONFIG_VALUE_DIRECTIVE_PATTERN =
+	/^([ \t]*)(HostName|User|IdentityFile|CertificateFile|ProxyJump|ProxyCommand|LocalForward|RemoteForward|DynamicForward|HostKeyAlias)(\s+)(.+)$/gim;
+const SSH_CONFIG_HOST_PATTERN = /^([ \t]*)(Host)(\s+)(.+)$/gim;
+const SSH_CONFIG_MATCH_PATTERN = /^([ \t]*)(Match)(\s+)(.+)$/gim;
+
+export function looks_like_ssh_config(text: string): boolean {
+	const has_scope_line = /^\s*(?:Host|Match)\b/m.test(text);
+	const has_sensitive_directive =
+		/^\s*(?:HostName|User|IdentityFile|CertificateFile|ProxyJump|ProxyCommand|LocalForward|RemoteForward|DynamicForward|HostKeyAlias)\b/im.test(
+			text,
+		);
+
+	return has_scope_line && has_sensitive_directive;
+}
+
+export function redact_ssh_config_metadata(
+	text: string,
+): RedactionResult {
+	let count = 0;
+
+	const redact_directive_value = (
+		match: string,
+		indent: string,
+		directive: string,
+		spacing: string,
+		value: string,
+	): string => {
+		if (value.includes('[REDACTED:')) return match;
+		count++;
+		return `${indent}${directive}${spacing}[REDACTED:SSH ${directive}]`;
+	};
+
+	let result = text.replace(
+		SSH_CONFIG_VALUE_DIRECTIVE_PATTERN,
+		redact_directive_value,
+	);
+
+	result = result.replace(
+		SSH_CONFIG_HOST_PATTERN,
+		(
+			match: string,
+			indent: string,
+			directive: string,
+			spacing: string,
+			value: string,
+		) => {
+			const trimmed = value.trim();
+			if (trimmed === '*' || value.includes('[REDACTED:'))
+				return match;
+			count++;
+			return `${indent}${directive}${spacing}[REDACTED:SSH Host]`;
+		},
+	);
+
+	result = result.replace(
+		SSH_CONFIG_MATCH_PATTERN,
+		(
+			match: string,
+			indent: string,
+			directive: string,
+			spacing: string,
+			value: string,
+		) => {
+			if (value.trim().toLowerCase() === 'all') return match;
+			if (value.includes('[REDACTED:')) return match;
+			count++;
+			return `${indent}${directive}${spacing}[REDACTED:SSH Match]`;
+		},
+	);
+
+	return { redacted: result, count };
+}
+
+function redact_secret_patterns(text: string): RedactionResult {
 	let count = 0;
 	let result = text;
 
@@ -98,24 +177,69 @@ function redact(text: string): { redacted: string; count: number } {
 	return { redacted: result, count };
 }
 
+function is_ssh_config_path(path: unknown): boolean {
+	if (typeof path !== 'string') return false;
+	const normalized = path.replaceAll('\\', '/').toLowerCase();
+	return /(?:^|\/)(?:\.ssh\/(?:config|config\.d\/.+|conf\.d\/.+)|ssh_config)$/.test(
+		normalized,
+	);
+}
+
+function should_force_ssh_config_redaction(event: {
+	toolName?: string;
+	input?: unknown;
+}): boolean {
+	if (event.toolName !== 'read') return false;
+	if (!event.input || typeof event.input !== 'object') return false;
+	return is_ssh_config_path((event.input as { path?: unknown }).path);
+}
+
+function is_text_content(
+	item: TextContent | ImageContent,
+): item is TextContent {
+	return item.type === 'text';
+}
+
+export function redact_text(
+	text: string,
+	options?: { force_ssh_config?: boolean },
+): RedactionResult {
+	let count = 0;
+	let result = text;
+
+	if (options?.force_ssh_config || looks_like_ssh_config(result)) {
+		const ssh_redaction = redact_ssh_config_metadata(result);
+		result = ssh_redaction.redacted;
+		count += ssh_redaction.count;
+	}
+
+	const secret_redaction = redact_secret_patterns(result);
+	result = secret_redaction.redacted;
+	count += secret_redaction.count;
+
+	return { redacted: result, count };
+}
+
 export default async function filter_output(pi: ExtensionAPI) {
 	let totalRedacted = 0;
 
-	pi.on('tool_result' as const, async (event: any) => {
+	pi.on('tool_result', async (event) => {
 		if (!event.content) return;
 
+		const force_ssh_config = should_force_ssh_config_redaction(event);
 		let modified = false;
-		const newContent = event.content.map(
-			(item: { type: string; text?: string }) => {
-				if (item.type !== 'text' || !item.text) return item;
-				const { redacted, count } = redact(item.text);
-				if (count > 0) {
-					modified = true;
-					totalRedacted += count;
-				}
-				return { ...item, text: redacted };
-			},
-		);
+
+		const newContent = event.content.map((item) => {
+			if (!is_text_content(item) || !item.text) return item;
+			const { redacted, count } = redact_text(item.text, {
+				force_ssh_config,
+			});
+			if (count > 0) {
+				modified = true;
+				totalRedacted += count;
+			}
+			return { ...item, text: redacted } satisfies TextContent;
+		});
 
 		if (modified) {
 			return { content: newContent };
